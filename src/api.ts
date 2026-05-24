@@ -25,7 +25,9 @@ async function get(path: string) {
 
 // ── Topics ──────────────────────────────────────────────────
 export const getMyTopics   = () => get('/topics/me')
-export const getAdminStats = () => get('/admin/stats')
+export const getAdminStats      = () => get('/admin/stats')
+export const getDatalakeUsers   = () => get('/admin/datalake')
+export const getDatalakeUser    = (user_id: number) => get(`/admin/datalake/${user_id}`)
 export const runAnalytics  = () => post('/analytics/run', {})
 export const getMyAnalytics= () => get('/analytics/me')
 export const getMyTensor   = () => get('/analytics/me/tensor')

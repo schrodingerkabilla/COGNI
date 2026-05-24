@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import * as api from '../api'
 
+// ── Types ────────────────────────────────────────────────────
+
 interface Stats {
   counts: Record<string, number>
   recent_events: {
@@ -20,37 +22,68 @@ interface Stats {
   }[]
 }
 
-interface TensorData {
-  feature_matrix: number[][]
-  feature_names: string[]
-  shape: [number, number]
-  computed_at: string | null
+interface DatalakeUserSummary {
+  id: number; username: string; total_xp: number
+  total_sessions: number; overall_accuracy: number; attempt_count: number
 }
 
-const FEATURE_DESCRIPTIONS: Record<string, string> = {
-  is_correct:                    'Was the answer correct? (0/1)',
-  time_to_answer_ms:             'Total ms from question shown to confirm',
-  time_to_first_interaction_ms:  'Ms before first click/hover',
-  time_from_last_switch_ms:      'Ms between last option switch and confirm',
-  hover_count:                   'Number of option hover events',
-  hover_avg_duration_ms:         'Average hover duration in ms',
-  switch_count:                  'Number of answer switches',
-  review_count:                  'Times Re-read button was pressed',
-  tab_away_count:                'Times user tabbed away from window',
-  tab_away_total_ms:             'Total ms spent tabbed away',
-  strategy_enc:                  'Integer-encoded strategy label',
-  pattern_enc:                   'Integer-encoded pattern_id',
-  topic_enc:                     'Integer-encoded topic_id',
-  attempt_number:                'Position within the session (0-indexed)',
-  accuracy_so_far:               'Rolling accuracy up to this attempt',
+interface HoverEv {
+  id: number; option_value: number; hover_start_ms: number
+  hover_end_ms: number; hover_duration_ms: number
+  sequence_index: number; was_final_selection: boolean
 }
+interface SwitchEv {
+  id: number; from_option: number; to_option: number
+  timestamp_ms: number; switch_number: number
+  time_since_last_switch_ms: number; time_since_question_shown_ms: number
+}
+interface ReviewEv {
+  id: number; review_number: number; review_start_ms: number
+  review_end_ms: number; review_duration_ms: number
+  option_hovered_during_review: boolean; changed_answer_after_review: boolean
+  answer_before_review: number | null; answer_after_review: number | null
+}
+interface StrengthEv {
+  id: number; step_index: number; old_value: number; new_value: number
+  timestamp_ms: number; drag_count: number; time_to_first_drag_ms: number
+  time_between_drags_ms: number; total_time_on_step_ms: number
+}
+interface AttemptRow {
+  attempt_id: number; question_prompt: string
+  correct_answer: number; selected_answer: number | null; is_correct: boolean
+  pattern_id: string; strategy: string
+  time_to_answer_ms: number; time_to_first_interaction_ms: number
+  time_before_first_hover_ms: number; time_from_last_switch_to_submit_ms: number
+  hover_count: number; switch_count: number; review_count: number
+  strength_change_count: number; total_hover_duration_ms: number
+  hovers: HoverEv[]; switches: SwitchEv[]
+  reviews: ReviewEv[]; strength_changes: StrengthEv[]
+}
+interface DatalakeSession {
+  session_id: number; topic_id: string; started_at: string | null
+  ended_at: string | null; total_questions: number; correct_count: number
+  accuracy: number; xp_gained: number; attempts: AttemptRow[]
+}
+interface DatalakeUser {
+  user: { id: number; username: string; email: string; total_xp: number; level: number; total_sessions: number; overall_accuracy: number; created_at: string | null }
+  sessions: DatalakeSession[]
+  tab_visibility_events: { id: number; session_id: number | null; attempt_id: number | null; hidden_at_ms: number; visible_at_ms: number; duration_ms: number; was_mid_question: boolean; had_selection: boolean }[]
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+function ms(v: number) { return v > 999 ? (v / 1000).toFixed(2) + 's' : v + 'ms' }
+function ts(iso: string | null) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+function accColor(v: number) { return v >= 75 ? '#06d6a0' : v >= 50 ? '#f59e0b' : '#ff3d6b' }
 
 const EVENT_COLORS: Record<string, string> = {
   hover: '#60d4ff', switch: '#f59e0b', strength: '#c4b5fd',
   review: '#06d6a0', tab_visibility: '#0088ff', focus_hint: '#ff9f43',
   attempt: '#e8f4ff', session_start: '#aaaaaa', session_end: '#888888',
 }
-
 const COUNT_TILES = [
   { key: 'users',                 label: 'Users',          icon: '👤', color: '#60d4ff' },
   { key: 'sessions',              label: 'Sessions',       icon: '▶',  color: '#0088ff' },
@@ -64,33 +97,229 @@ const COUNT_TILES = [
   { key: 'raw_events',            label: 'Raw Events',     icon: '◉',  color: '#aaaaaa' },
 ]
 
-function ts(iso: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const TH: React.CSSProperties = {
+  padding: '8px 12px', textAlign: 'left', fontWeight: 700,
+  color: 'rgba(0,190,255,0.5)', fontSize: 10, letterSpacing: 0.8,
+  textTransform: 'uppercase', whiteSpace: 'nowrap',
+  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  borderRight: '1px solid rgba(255,255,255,0.04)',
+  background: 'rgba(0,100,255,0.06)',
+}
+const TD: React.CSSProperties = {
+  padding: '8px 12px', fontSize: 12, whiteSpace: 'nowrap',
+  borderBottom: '1px solid rgba(255,255,255,0.04)',
+  borderRight: '1px solid rgba(255,255,255,0.03)',
 }
 
-function colColor(name: string, val: number): string {
-  if (name === 'is_correct')      return val === 1 ? '#06d6a0' : '#ff3d6b'
-  if (name === 'accuracy_so_far') return val >= 0.75 ? '#06d6a0' : val >= 0.5 ? '#f59e0b' : '#ff3d6b'
-  return '#e8f4ff'
+// ── Sub-components ───────────────────────────────────────────
+
+function AttemptDetail({ a }: { a: AttemptRow }) {
+  return (
+    <div style={{ padding: '12px 20px 16px 36px', background: 'rgba(0,0,0,0.25)', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+      {a.hovers.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#60d4ff', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Hovers ({a.hovers.length})</div>
+          {a.hovers.map(h => (
+            <div key={h.id} style={{ fontSize: 11, color: 'rgba(140,200,255,0.7)', marginBottom: 3, fontFamily: 'monospace' }}>
+              opt {h.option_value} · {ms(h.hover_duration_ms)} · seq#{h.sequence_index}{h.was_final_selection ? ' ✓' : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      {a.switches.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Switches ({a.switches.length})</div>
+          {a.switches.map(sw => (
+            <div key={sw.id} style={{ fontSize: 11, color: 'rgba(140,200,255,0.7)', marginBottom: 3, fontFamily: 'monospace' }}>
+              {sw.from_option}→{sw.to_option} · @{ms(sw.timestamp_ms)}
+            </div>
+          ))}
+        </div>
+      )}
+      {a.reviews.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#06d6a0', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Re-reads ({a.reviews.length})</div>
+          {a.reviews.map(r => (
+            <div key={r.id} style={{ fontSize: 11, color: 'rgba(140,200,255,0.7)', marginBottom: 3, fontFamily: 'monospace' }}>
+              {ms(r.review_duration_ms)}{r.changed_answer_after_review ? ' · changed' : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      {a.strength_changes.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#c4b5fd', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Strength drags ({a.strength_changes.length})</div>
+          {a.strength_changes.map(sc => (
+            <div key={sc.id} style={{ fontSize: 11, color: 'rgba(140,200,255,0.7)', marginBottom: 3, fontFamily: 'monospace' }}>
+              step{sc.step_index}: {sc.old_value}→{sc.new_value} · {sc.drag_count}x
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
-function fmt(name: string, val: number): string {
-  if (name === 'is_correct')      return val === 1 ? '✓' : '✗'
-  if (name === 'accuracy_so_far') return (val * 100).toFixed(0) + '%'
-  if (name.endsWith('_ms'))       return val > 999 ? (val / 1000).toFixed(1) + 's' : val.toFixed(0) + 'ms'
-  if (Number.isInteger(val))      return String(val)
-  return val.toFixed(2)
+function DataLakeView({ users }: { users: DatalakeUserSummary[] }) {
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(users[0]?.id ?? null)
+  const [userData, setUserData] = useState<DatalakeUser | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [expandedAttempt, setExpandedAttempt] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!selectedUserId) return
+    setLoading(true)
+    setUserData(null)
+    setExpandedAttempt(null)
+    api.getDatalakeUser(selectedUserId)
+      .then(setUserData)
+      .catch(console.warn)
+      .finally(() => setLoading(false))
+  }, [selectedUserId])
+
+  const allAttempts: (AttemptRow & { session_id: number; topic_id: string })[] =
+    (userData?.sessions ?? []).flatMap(s =>
+      s.attempts.map(a => ({ ...a, session_id: s.session_id, topic_id: s.topic_id }))
+    )
+
+  return (
+    <div>
+      {/* User pills */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+        {users.map(u => (
+          <button
+            key={u.id}
+            onClick={() => setSelectedUserId(u.id)}
+            style={{
+              padding: '8px 16px', borderRadius: 10, border: '1px solid',
+              fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              transition: 'all 0.15s',
+              borderColor: selectedUserId === u.id ? '#60d4ff' : 'rgba(0,150,255,0.2)',
+              background: selectedUserId === u.id ? 'rgba(0,150,255,0.18)' : 'rgba(0,100,255,0.06)',
+              color: selectedUserId === u.id ? '#60d4ff' : 'rgba(140,200,255,0.55)',
+            }}
+          >
+            {u.username}
+            <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.65 }}>{u.attempt_count} attempts</span>
+          </button>
+        ))}
+      </div>
+
+      {loading && (
+        <div style={{ color: 'rgba(140,200,255,0.4)', textAlign: 'center', padding: 40 }}>Loading user data…</div>
+      )}
+
+      {userData && (
+        <>
+          {/* User stat bar */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+            {[
+              { label: 'User ID',   val: `#${userData.user.id}`,                          color: 'rgba(140,200,255,0.5)' },
+              { label: 'Sessions',  val: userData.user.total_sessions,                     color: '#60d4ff' },
+              { label: 'Attempts',  val: allAttempts.length,                               color: '#e8f4ff' },
+              { label: 'Accuracy',  val: userData.user.overall_accuracy ? userData.user.overall_accuracy.toFixed(1) + '%' : '—', color: accColor(userData.user.overall_accuracy) },
+              { label: 'XP',        val: userData.user.total_xp.toLocaleString(),          color: '#f59e0b' },
+              { label: 'Level',     val: `Lv ${userData.user.level}`,                      color: '#c4b5fd' },
+              { label: 'Tab-aways', val: userData.tab_visibility_events.length,            color: '#0088ff' },
+            ].map(item => (
+              <div key={item.label} className="glass" style={{ padding: '10px 16px', textAlign: 'center', minWidth: 80 }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: item.color, lineHeight: 1 }}>{item.val}</div>
+                <div style={{ fontSize: 10, color: 'rgba(140,200,255,0.4)', fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 4 }}>{item.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Flat attempt table */}
+          {allAttempts.length === 0 ? (
+            <div className="glass" style={{ padding: 32, textAlign: 'center', color: 'rgba(140,200,255,0.4)' }}>
+              No attempts yet for this user.
+            </div>
+          ) : (
+            <div className="glass" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(0,190,255,0.5)' }}>
+                {allAttempts.length} Attempts — click row to expand events
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+                  <thead>
+                    <tr>
+                      {['#','Sess','Topic','Pattern','Question','✓/✗','Answer','Strategy',
+                        'Total ms','First interact','First hover','Last switch→submit',
+                        'Hovers','Hover ms','Switches','Re-reads','Strength drags', ''].map(h => (
+                        <th key={h} style={TH}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allAttempts.map((a, i) => {
+                      const isOpen = expandedAttempt === a.attempt_id
+                      const hasEvents = a.hover_count + a.switch_count + a.review_count + a.strength_change_count > 0
+                      return (
+                        <>
+                          <tr
+                            key={a.attempt_id}
+                            onClick={() => hasEvents && setExpandedAttempt(isOpen ? null : a.attempt_id)}
+                            style={{
+                              background: isOpen ? 'rgba(0,100,255,0.09)' : i % 2 === 0 ? 'transparent' : 'rgba(0,100,255,0.025)',
+                              cursor: hasEvents ? 'pointer' : 'default',
+                            }}
+                          >
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.4)', fontWeight: 600 }}>a{a.attempt_id}</td>
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.5)' }}>s{a.session_id}</td>
+                            <td style={{ ...TD, color: '#60d4ff' }}>{a.topic_id}</td>
+                            <td style={{ ...TD, color: '#c4b5fd', fontFamily: 'monospace' }}>{a.pattern_id}</td>
+                            <td style={{ ...TD, color: '#e8f4ff', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.question_prompt}</td>
+                            <td style={{ ...TD, color: a.is_correct ? '#06d6a0' : '#ff3d6b', fontWeight: 900, textAlign: 'center', fontSize: 14 }}>
+                              {a.is_correct ? '✓' : '✗'}
+                            </td>
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.7)', fontFamily: 'monospace' }}>
+                              {a.selected_answer ?? '—'} / {a.correct_answer}
+                            </td>
+                            <td style={{ ...TD, color: '#f59e0b' }}>{a.strategy}</td>
+                            <td style={{ ...TD, color: '#e8f4ff', fontFamily: 'monospace' }}>{ms(a.time_to_answer_ms)}</td>
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.65)', fontFamily: 'monospace' }}>{ms(a.time_to_first_interaction_ms)}</td>
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.65)', fontFamily: 'monospace' }}>{ms(a.time_before_first_hover_ms)}</td>
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.65)', fontFamily: 'monospace' }}>{ms(a.time_from_last_switch_to_submit_ms)}</td>
+                            <td style={{ ...TD, color: '#60d4ff', textAlign: 'center' }}>{a.hover_count}</td>
+                            <td style={{ ...TD, color: 'rgba(96,212,255,0.65)', fontFamily: 'monospace' }}>{a.hover_count ? ms(a.total_hover_duration_ms) : '—'}</td>
+                            <td style={{ ...TD, color: '#f59e0b', textAlign: 'center' }}>{a.switch_count}</td>
+                            <td style={{ ...TD, color: '#06d6a0', textAlign: 'center' }}>{a.review_count}</td>
+                            <td style={{ ...TD, color: '#c4b5fd', textAlign: 'center' }}>{a.strength_change_count}</td>
+                            <td style={{ ...TD, color: 'rgba(140,200,255,0.3)', textAlign: 'center', fontSize: 11 }}>
+                              {hasEvents ? (isOpen ? '▲' : '▼') : ''}
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr key={`${a.attempt_id}-detail`}>
+                              <td colSpan={18} style={{ padding: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                <AttemptDetail a={a} />
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
 }
+
+// ── Main component ───────────────────────────────────────────
 
 export default function DataView() {
-  const [stats,   setStats]   = useState<Stats | null>(null)
-  const [tensor,  setTensor]  = useState<TensorData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [tensorLoading, setTensorLoading] = useState(false)
-  const [error,   setError]   = useState('')
-  const [tab,     setTab]     = useState<'events' | 'sessions' | 'users' | 'tensor'>('events')
-  const [expanded, setExpanded] = useState<number | null>(null)
+  const [stats,         setStats]         = useState<Stats | null>(null)
+  const [dlUsers,       setDlUsers]       = useState<DatalakeUserSummary[]>([])
+  const [loading,       setLoading]       = useState(true)
+  const [dlLoading,     setDlLoading]     = useState(false)
+  const [error,         setError]         = useState('')
+  const [tab,           setTab]           = useState<'overview' | 'lake' | 'sessions' | 'users'>('overview')
+  const [expandedEvent, setExpandedEvent] = useState<number | null>(null)
 
   async function load() {
     setLoading(true); setError('')
@@ -102,38 +331,30 @@ export default function DataView() {
     } finally { setLoading(false) }
   }
 
-  async function loadTensor() {
-    setTensorLoading(true)
+  async function loadDatalake() {
+    if (dlUsers.length > 0) return
+    setDlLoading(true)
     try {
-      const data = await api.getMyTensor()
-      setTensor(data)
-    } catch {
-      // no tensor yet — try running analytics first
-      try {
-        await api.runAnalytics()
-        const data = await api.getMyTensor()
-        setTensor(data)
-      } catch {
-        setTensor(null)
-      }
-    } finally { setTensorLoading(false) }
+      const users = await api.getDatalakeUsers()
+      setDlUsers(users)
+    } catch { /* ignore */ }
+    finally { setDlLoading(false) }
   }
 
   useEffect(() => { load() }, [])
 
   useEffect(() => {
-    if (tab === 'tensor' && !tensor) loadTensor()
+    if (tab === 'lake') loadDatalake()
   }, [tab])
 
   return (
     <div className="content-scroll">
 
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#e8f4ff' }}>◉ Data Lake</div>
           <div style={{ fontSize: 12, color: 'rgba(0,190,255,0.5)', marginTop: 2 }}>
-            Every event, attempt, and behavioral signal captured per user
+            Every event, attempt, and behavioral signal per user
           </div>
         </div>
         <button onClick={load} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,150,255,0.3)', background: 'rgba(0,100,255,0.1)', color: '#60d4ff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -170,38 +391,40 @@ export default function DataView() {
 
           {/* Tab bar */}
           <div style={{ display: 'flex', gap: 4, marginBottom: 16, background: 'rgba(0,100,255,0.07)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
-            {(['events', 'sessions', 'tensor', 'users'] as const).map(t => (
+            {([
+              ['overview', 'Overview'],
+              ['lake',     'Data Lake'],
+              ['sessions', 'Sessions'],
+              ['users',    'Users'],
+            ] as [typeof tab, string][]).map(([key, label]) => (
               <button
-                key={t}
-                onClick={() => setTab(t)}
+                key={key}
+                onClick={() => setTab(key)}
                 style={{
                   padding: '7px 18px', borderRadius: 8, border: 'none', fontFamily: 'inherit',
                   fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
-                  background: tab === t ? 'rgba(0,150,255,0.22)' : 'transparent',
-                  color: tab === t ? '#60d4ff' : 'rgba(140,200,255,0.4)',
+                  background: tab === key ? 'rgba(0,150,255,0.22)' : 'transparent',
+                  color: tab === key ? '#60d4ff' : 'rgba(140,200,255,0.4)',
                 }}
               >
-                {t === 'events'  ? `Events (${stats.recent_events.length})`
-                 : t === 'sessions' ? `Sessions (${stats.sessions.length})`
-                 : t === 'tensor'   ? `Feature Matrix`
-                 : `Users (${stats.users.length})`}
+                {label}
               </button>
             ))}
           </div>
 
-          {/* ── EVENTS TAB ── */}
-          {tab === 'events' && (
+          {/* ── OVERVIEW TAB ── */}
+          {tab === 'overview' && (
             <div className="glass" style={{ overflow: 'hidden' }}>
               <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(0,190,255,0.5)' }}>
-                Last 30 Raw Events — click any row to expand payload
+                Last 30 Raw Events — click row to expand payload
               </div>
               {stats.recent_events.map(ev => {
                 const color = EVENT_COLORS[ev.type] ?? '#888'
-                const isOpen = expanded === ev.id
+                const isOpen = expandedEvent === ev.id
                 return (
                   <div key={ev.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                     <div
-                      onClick={() => setExpanded(isOpen ? null : ev.id)}
+                      onClick={() => setExpandedEvent(isOpen ? null : ev.id)}
                       style={{
                         display: 'grid', gridTemplateColumns: '60px 130px 60px 60px 80px 1fr 24px',
                         gap: 12, padding: '10px 20px', cursor: 'pointer', alignItems: 'center',
@@ -218,12 +441,7 @@ export default function DataView() {
                     </div>
                     {isOpen && (
                       <div style={{ padding: '0 20px 14px 20px' }}>
-                        <pre style={{
-                          margin: 0, padding: '12px 14px', borderRadius: 8,
-                          background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)',
-                          fontSize: 11, color: '#a0d4ff', overflow: 'auto',
-                          fontFamily: '"Courier New", monospace', lineHeight: 1.6, maxHeight: 220,
-                        }}>
+                        <pre style={{ margin: 0, padding: '12px 14px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)', fontSize: 11, color: '#a0d4ff', overflow: 'auto', fontFamily: '"Courier New", monospace', lineHeight: 1.6, maxHeight: 220 }}>
                           {JSON.stringify(ev.payload, null, 2)}
                         </pre>
                       </div>
@@ -232,6 +450,15 @@ export default function DataView() {
                 )
               })}
             </div>
+          )}
+
+          {/* ── DATA LAKE TAB ── */}
+          {tab === 'lake' && (
+            dlLoading
+              ? <div style={{ color: 'rgba(140,200,255,0.4)', textAlign: 'center', padding: 40 }}>Loading users…</div>
+              : dlUsers.length === 0
+                ? <div className="glass" style={{ padding: 32, textAlign: 'center', color: 'rgba(140,200,255,0.4)' }}>No users yet.</div>
+                : <DataLakeView users={dlUsers} />
           )}
 
           {/* ── SESSIONS TAB ── */}
@@ -245,113 +472,30 @@ export default function DataView() {
                   <thead>
                     <tr style={{ background: 'rgba(0,100,255,0.06)' }}>
                       {['ID','User','Topic','Started','Q','Correct','Acc%','XP','Hovers','Switches','Re-reads'].map(h => (
-                        <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, color: 'rgba(0,190,255,0.5)', fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{h}</th>
+                        <th key={h} style={TH}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.sessions.map((s, i) => {
-                      const accColor = s.accuracy >= 75 ? '#06d6a0' : s.accuracy >= 50 ? '#f59e0b' : '#ff3d6b'
-                      return (
-                        <tr key={s.id} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(0,100,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td style={{ padding: '9px 14px', color: 'rgba(140,200,255,0.45)' }}>#{s.id}</td>
-                          <td style={{ padding: '9px 14px', color: '#e8f4ff', fontWeight: 600 }}>u{s.user_id}</td>
-                          <td style={{ padding: '9px 14px', color: '#60d4ff' }}>{s.topic_id}</td>
-                          <td style={{ padding: '9px 14px', color: 'rgba(140,200,255,0.5)', whiteSpace: 'nowrap' }}>{ts(s.started_at)}</td>
-                          <td style={{ padding: '9px 14px', color: '#e8f4ff', textAlign: 'center' }}>{s.attempts_count}</td>
-                          <td style={{ padding: '9px 14px', color: '#06d6a0', textAlign: 'center' }}>{s.correct_count}</td>
-                          <td style={{ padding: '9px 14px', color: accColor, fontWeight: 800, textAlign: 'center' }}>{s.accuracy ? s.accuracy.toFixed(0) : '—'}</td>
-                          <td style={{ padding: '9px 14px', color: '#f59e0b', textAlign: 'center' }}>+{s.xp_gained}</td>
-                          <td style={{ padding: '9px 14px', color: '#60d4ff', textAlign: 'center' }}>{s.hovers_count}</td>
-                          <td style={{ padding: '9px 14px', color: '#f59e0b', textAlign: 'center' }}>{s.switches_count}</td>
-                          <td style={{ padding: '9px 14px', color: '#06d6a0', textAlign: 'center' }}>{s.reviews_count}</td>
-                        </tr>
-                      )
-                    })}
+                    {stats.sessions.map((s, i) => (
+                      <tr key={s.id} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(0,100,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <td style={{ ...TD, color: 'rgba(140,200,255,0.45)' }}>#{s.id}</td>
+                        <td style={{ ...TD, color: '#e8f4ff', fontWeight: 600 }}>u{s.user_id}</td>
+                        <td style={{ ...TD, color: '#60d4ff' }}>{s.topic_id}</td>
+                        <td style={{ ...TD, color: 'rgba(140,200,255,0.5)' }}>{ts(s.started_at)}</td>
+                        <td style={{ ...TD, color: '#e8f4ff', textAlign: 'center' }}>{s.attempts_count}</td>
+                        <td style={{ ...TD, color: '#06d6a0', textAlign: 'center' }}>{s.correct_count}</td>
+                        <td style={{ ...TD, color: accColor(s.accuracy), fontWeight: 800, textAlign: 'center' }}>{s.accuracy ? s.accuracy.toFixed(0) : '—'}</td>
+                        <td style={{ ...TD, color: '#f59e0b', textAlign: 'center' }}>+{s.xp_gained}</td>
+                        <td style={{ ...TD, color: '#60d4ff', textAlign: 'center' }}>{s.hovers_count}</td>
+                        <td style={{ ...TD, color: '#f59e0b', textAlign: 'center' }}>{s.switches_count}</td>
+                        <td style={{ ...TD, color: '#06d6a0', textAlign: 'center' }}>{s.reviews_count}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
-          )}
-
-          {/* ── TENSOR TAB ── */}
-          {tab === 'tensor' && (
-            <>
-              {/* Feature legend */}
-              <div className="glass" style={{ padding: '18px 22px', marginBottom: 16 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'rgba(0,190,255,0.5)', marginBottom: 14 }}>
-                  15 Captured Features — one row per attempt
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
-                  {Object.entries(FEATURE_DESCRIPTIONS).map(([name, desc], i) => (
-                    <div key={name} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 10, fontWeight: 800, color: '#0088ff', minWidth: 18, marginTop: 1 }}>{i}</span>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#e8f4ff', fontFamily: '"Courier New", monospace' }}>{name}</div>
-                        <div style={{ fontSize: 10, color: 'rgba(140,200,255,0.45)', lineHeight: 1.4 }}>{desc}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Matrix */}
-              {tensorLoading && (
-                <div style={{ color: 'rgba(140,200,255,0.45)', fontSize: 14, textAlign: 'center', padding: 40 }}>
-                  Loading feature matrix…
-                </div>
-              )}
-
-              {!tensorLoading && !tensor && (
-                <div className="glass" style={{ padding: 32, textAlign: 'center' }}>
-                  <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#e8f4ff', marginBottom: 8 }}>No tensor yet</div>
-                  <div style={{ fontSize: 13, color: 'rgba(140,200,255,0.5)' }}>Complete a practice session — the matrix builds automatically.</div>
-                </div>
-              )}
-
-              {tensor && tensor.feature_matrix.length > 0 && (
-                <div className="glass" style={{ overflow: 'hidden' }}>
-                  <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(0,190,255,0.5)' }}>
-                      Feature Matrix
-                    </div>
-                    <span style={{ padding: '2px 10px', borderRadius: 20, background: 'rgba(0,150,255,0.12)', border: '1px solid rgba(0,150,255,0.25)', fontSize: 11, fontWeight: 800, color: '#60d4ff' }}>
-                      {tensor.shape[0]} × {tensor.shape[1]}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'rgba(140,200,255,0.35)', marginLeft: 'auto' }}>
-                      {tensor.computed_at ? new Date(tensor.computed_at).toLocaleTimeString() : '—'}
-                    </span>
-                  </div>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ borderCollapse: 'collapse', fontSize: 11, whiteSpace: 'nowrap' }}>
-                      <thead>
-                        <tr style={{ background: 'rgba(0,100,255,0.08)' }}>
-                          <th style={{ padding: '8px 12px', color: 'rgba(0,190,255,0.45)', fontSize: 10, fontWeight: 700, textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>#</th>
-                          {tensor.feature_names.map((n, i) => (
-                            <th key={i} style={{ padding: '8px 10px', color: '#0088ff', fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.04)' }}>
-                              {n.replace(/_/g, ' ')}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tensor.feature_matrix.map((row, ri) => (
-                          <tr key={ri} style={{ background: ri % 2 === 0 ? 'transparent' : 'rgba(0,100,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                            <td style={{ padding: '7px 12px', color: 'rgba(140,200,255,0.35)', textAlign: 'center', fontWeight: 600, borderRight: '1px solid rgba(255,255,255,0.06)' }}>{ri}</td>
-                            {row.map((val, ci) => (
-                              <td key={ci} style={{ padding: '7px 10px', textAlign: 'center', fontFamily: '"Courier New", monospace', fontWeight: ci === 0 ? 800 : 400, color: colColor(tensor.feature_names[ci], val), borderRight: '1px solid rgba(255,255,255,0.03)' }}>
-                                {fmt(tensor.feature_names[ci], val)}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
           )}
 
           {/* ── USERS TAB ── */}
@@ -360,35 +504,33 @@ export default function DataView() {
               <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(0,190,255,0.5)' }}>
                 All Users
               </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: 'rgba(0,100,255,0.06)' }}>
-                      {['ID','Username','XP','Sessions','Accuracy%','Level'].map(h => (
-                        <th key={h} style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, color: 'rgba(0,190,255,0.5)', fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.users.map((u, i) => (
-                      <tr key={u.id} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(0,100,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <td style={{ padding: '10px 14px', color: 'rgba(140,200,255,0.45)' }}>#{u.id}</td>
-                        <td style={{ padding: '10px 14px', color: '#e8f4ff', fontWeight: 700 }}>{u.username}</td>
-                        <td style={{ padding: '10px 14px', color: '#f59e0b', fontWeight: 800 }}>{u.total_xp.toLocaleString()}</td>
-                        <td style={{ padding: '10px 14px', color: '#60d4ff', textAlign: 'center' }}>{u.total_sessions}</td>
-                        <td style={{ padding: '10px 14px', color: u.overall_accuracy >= 75 ? '#06d6a0' : u.overall_accuracy >= 50 ? '#f59e0b' : '#ff3d6b', fontWeight: 800, textAlign: 'center' }}>
-                          {u.overall_accuracy ? u.overall_accuracy.toFixed(1) : '—'}
-                        </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                          <span style={{ padding: '2px 10px', borderRadius: 20, background: 'rgba(0,150,255,0.15)', border: '1px solid rgba(0,150,255,0.3)', color: '#60d4ff', fontSize: 11, fontWeight: 700 }}>
-                            Lv {u.level}
-                          </span>
-                        </td>
-                      </tr>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    {['ID','Username','XP','Sessions','Accuracy%','Level'].map(h => (
+                      <th key={h} style={TH}>{h}</th>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.users.map((u, i) => (
+                    <tr key={u.id} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(0,100,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <td style={{ ...TD, color: 'rgba(140,200,255,0.45)' }}>#{u.id}</td>
+                      <td style={{ ...TD, color: '#e8f4ff', fontWeight: 700 }}>{u.username}</td>
+                      <td style={{ ...TD, color: '#f59e0b', fontWeight: 800 }}>{u.total_xp.toLocaleString()}</td>
+                      <td style={{ ...TD, color: '#60d4ff', textAlign: 'center' }}>{u.total_sessions}</td>
+                      <td style={{ ...TD, color: accColor(u.overall_accuracy), fontWeight: 800, textAlign: 'center' }}>
+                        {u.overall_accuracy ? u.overall_accuracy.toFixed(1) : '—'}
+                      </td>
+                      <td style={{ ...TD }}>
+                        <span style={{ padding: '2px 10px', borderRadius: 20, background: 'rgba(0,150,255,0.15)', border: '1px solid rgba(0,150,255,0.3)', color: '#60d4ff', fontSize: 11, fontWeight: 700 }}>
+                          Lv {u.level}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
