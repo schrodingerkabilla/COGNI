@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { TOPICS } from '../data'
 import { generateQuestions } from '../utils/questionGen'
 import type { Question, SolutionStep } from '../utils/questionGen'
@@ -177,6 +177,8 @@ export default function QuickQuiz({ onNav }: Props) {
   const [total,     setTotal]    = useState(0)
   const [conf,      setConf]     = useState<Record<string, number>>({})
 
+  const [reviewOpen,    setReviewOpen]    = useState(false)
+
   const sessionId    = useRef<number | null>(null)
   const attemptId    = useRef<number | null>(null)
   const qStartMs     = useRef(Date.now())
@@ -185,8 +187,13 @@ export default function QuickQuiz({ onNav }: Props) {
   const hoverSeq     = useRef(0)
   const switchCount  = useRef(0)
   const lastSwitchMs = useRef<number | null>(null)
-  const pendingHovers= useRef<Omit<Parameters<typeof api.logHover>[0],'attempt_id'>[]>([])
+  const tabHideMs    = useRef<number | null>(null)
+  const reviewCount     = useRef(0)
+  const reviewStartMs   = useRef<number | null>(null)
+  const reviewSelAtStart= useRef<number | null>(null)
+  const pendingHovers   = useRef<Omit<Parameters<typeof api.logHover>[0],'attempt_id'>[]>([])
   const pendingSwitches = useRef<Omit<Parameters<typeof api.logSwitch>[0],'attempt_id'>[]>([])
+  const pendingReviews  = useRef<Omit<Parameters<typeof api.logReview>[0],'attempt_id'>[]>([])
 
   useState(() => {
     api.startSession('mixed')
@@ -264,11 +271,12 @@ export default function QuickQuiz({ onNav }: Props) {
       })
         .then(d => {
           attemptId.current = d.attempt_id
-          // flush all buffered events
           pendingHovers.current.forEach(e   => api.fire(api.logHover({   ...e, attempt_id: d.attempt_id })))
           pendingSwitches.current.forEach(e => api.fire(api.logSwitch({  ...e, attempt_id: d.attempt_id })))
+          pendingReviews.current.forEach(e  => api.fire(api.logReview({  ...e, attempt_id: d.attempt_id })))
           pendingHovers.current   = []
           pendingSwitches.current = []
+          pendingReviews.current  = []
         })
         .catch(console.warn)
     }
@@ -278,15 +286,18 @@ export default function QuickQuiz({ onNav }: Props) {
     setSel(null)
     setConfirmed(null)
     setConf({})
-    qStartMs.current      = Date.now()
-    firstInter.current    = null
-    hoverStart.current    = null
-    hoverSeq.current      = 0
-    switchCount.current   = 0
-    lastSwitchMs.current  = null
-    attemptId.current     = null
-    pendingHovers.current = []
-    pendingSwitches.current = []
+    qStartMs.current       = Date.now()
+    firstInter.current     = null
+    hoverStart.current     = null
+    hoverSeq.current       = 0
+    switchCount.current    = 0
+    lastSwitchMs.current   = null
+    attemptId.current      = null
+    reviewCount.current    = 0
+    reviewStartMs.current  = null
+    pendingHovers.current  = []
+    pendingSwitches.current= []
+    pendingReviews.current = []
     setCurrent(nextRandom())
   }, [])
 
@@ -330,6 +341,61 @@ export default function QuickQuiz({ onNav }: Props) {
       was_final_selection: false,
     })
   }, [revealed])
+
+  // ── Tab visibility ────────────────────────────────────────
+  useEffect(() => {
+    const onVisChange = () => {
+      if (document.hidden) {
+        tabHideMs.current = Date.now()
+      } else if (tabHideMs.current !== null) {
+        const now         = Date.now()
+        const duration    = now - tabHideMs.current
+        const hiddenAt    = tabHideMs.current - qStartMs.current
+        const visibleAt   = now - qStartMs.current
+        tabHideMs.current = null
+        if (sessionId.current) {
+          api.fire(api.logTabVisibility({
+            session_id:      sessionId.current,
+            attempt_id:      null,
+            hidden_at_ms:    hiddenAt,
+            visible_at_ms:   visibleAt,
+            duration_ms:     duration,
+            was_mid_question: !revealed,
+            had_selection:   selected !== null,
+          }))
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', onVisChange)
+    return () => document.removeEventListener('visibilitychange', onVisChange)
+  }, [revealed, selected])
+
+  // ── Review helpers ────────────────────────────────────────
+  function openReview() {
+    if (selected === null || revealed) return
+    reviewStartMs.current    = Date.now()
+    reviewSelAtStart.current = selected
+    setReviewOpen(true)
+  }
+
+  function closeReview() {
+    if (reviewStartMs.current === null) { setReviewOpen(false); return }
+    const now      = Date.now()
+    const startRel = reviewStartMs.current - qStartMs.current
+    const endRel   = now - qStartMs.current
+    pendingReviews.current.push({
+      review_number:               ++reviewCount.current,
+      review_start_ms:             startRel,
+      review_end_ms:               endRel,
+      review_duration_ms:          endRel - startRel,
+      option_hovered_during_review: false,
+      changed_answer_after_review: selected !== reviewSelAtStart.current,
+      answer_before_review:        reviewSelAtStart.current,
+      answer_after_review:         selected,
+    })
+    reviewStartMs.current = null
+    setReviewOpen(false)
+  }
 
   const acc = total === 0 ? 100 : Math.round((correct / total) * 100)
   const accColor = acc >= 75 ? '#06d6a0' : acc >= 50 ? '#f59e0b' : '#ff3d6b'
@@ -445,18 +511,61 @@ export default function QuickQuiz({ onNav }: Props) {
         })}
       </div>
 
-      {/* Confirm button — appears once an option is selected */}
+      {/* Re-read + Confirm row */}
       {!revealed && selected !== null && (
-        <button
-          className="btn-primary"
-          onClick={confirm}
-          style={{ width: '100%', maxWidth: 560, justifyContent: 'center', marginBottom: 16, fontSize: 15 }}
-        >
-          Confirm Answer →
-        </button>
+        <div style={{ display: 'flex', gap: 10, width: '100%', maxWidth: 560, marginBottom: 16 }}>
+          <button
+            onClick={openReview}
+            style={{
+              padding: '14px 18px', borderRadius: 12, border: '1px solid rgba(0,150,255,0.25)',
+              background: 'rgba(0,100,255,0.08)', color: 'rgba(0,190,255,0.7)',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              flexShrink: 0, transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,100,255,0.16)'; e.currentTarget.style.color = '#60d4ff' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,100,255,0.08)'; e.currentTarget.style.color = 'rgba(0,190,255,0.7)' }}
+          >
+            📖 Re-read
+          </button>
+          <button
+            className="btn-primary"
+            onClick={confirm}
+            style={{ flex: 1, justifyContent: 'center', fontSize: 15 }}
+          >
+            Confirm Answer →
+          </button>
+        </div>
       )}
       {!revealed && selected === null && (
         <div style={{ height: 16, marginBottom: 16 }} />
+      )}
+
+      {/* Review modal */}
+      {reviewOpen && (
+        <div
+          onClick={closeReview}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(2,10,20,0.88)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="glass"
+            style={{ width: '100%', maxWidth: 480, padding: '36px 32px', textAlign: 'center' }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: topicColor, opacity: 0.7, marginBottom: 20 }}>
+              {topicIcon} {topicName} · Re-read
+            </div>
+            <div style={{ fontSize: 36, fontWeight: 900, color: '#e8f4ff', letterSpacing: '-0.5px', lineHeight: 1.2, marginBottom: 32 }}>
+              {q.prompt}
+            </div>
+            <button onClick={closeReview} className="btn-primary" style={{ justifyContent: 'center', fontSize: 14 }}>
+              Back to Answering →
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── Inline solution widget ── */}

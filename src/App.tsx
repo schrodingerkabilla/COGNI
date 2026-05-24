@@ -9,6 +9,8 @@ import TopicDetail from './components/TopicDetail'
 import PracticeSession from './components/PracticeSession'
 import QuickQuiz from './components/QuickQuiz'
 import LoginPage from './components/LoginPage'
+import OnboardingPage from './components/OnboardingPage'
+import * as api from './api'
 
 const NAV = [
   { id: 'dashboard' as Screen, label: 'Dashboard', icon: '⊞' },
@@ -37,8 +39,21 @@ export default function App() {
     setState(s => ({ ...s, screen: 'login' }))
   }
 
+  async function afterLogin() {
+    try {
+      const topics = await api.getMyTopics()
+      setState(s => ({ ...s, screen: Array.isArray(topics) && topics.length === 0 ? 'onboarding' : 'dashboard' }))
+    } catch {
+      setState(s => ({ ...s, screen: 'dashboard' }))
+    }
+  }
+
   if (state.screen === 'login') {
-    return <LoginPage onNav={nav} />
+    return <LoginPage onLoginSuccess={afterLogin} />
+  }
+
+  if (state.screen === 'onboarding') {
+    return <OnboardingPage onDone={() => nav('dashboard')} />
   }
 
   return (

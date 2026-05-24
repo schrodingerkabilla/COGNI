@@ -1,13 +1,12 @@
 import { useState } from 'react'
-import type { Screen } from '../types'
 
 interface Props {
-  onNav: (s: Screen) => void
+  onLoginSuccess: () => void
 }
 
 type Mode = 'login' | 'register'
 
-export default function LoginPage({ onNav }: Props) {
+export default function LoginPage({ onLoginSuccess }: Props) {
   const [mode,     setMode]     = useState<Mode>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -42,7 +41,7 @@ export default function LoginPage({ onNav }: Props) {
 
       localStorage.setItem('cogni_token',   data.token)
       localStorage.setItem('cogni_user_id', String(data.user_id))
-      onNav('dashboard')
+      onLoginSuccess()
     } catch {
       setError('Cannot reach server — is the backend running?')
     } finally {

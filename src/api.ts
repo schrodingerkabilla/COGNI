@@ -17,6 +17,18 @@ async function post(path: string, body: unknown) {
   return res.json()
 }
 
+async function get(path: string) {
+  const res = await fetch(API + path, { headers: headers() })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ── Topics ──────────────────────────────────────────────────
+export const getMyTopics = () => get('/topics/me')
+
+export const saveOnboarding = (topics: { topic_id: string; initial_confidence: number }[]) =>
+  post('/topics/onboarding', { topics })
+
 // ── Sessions ────────────────────────────────────────────────
 export const startSession = (topic_id: string) =>
   post('/sessions/start', { topic_id })
@@ -96,6 +108,16 @@ export const logFocusHint = (data: {
   strategy: string | null
   time_before_answering_ms: number
 }) => post('/events/focus-hint', data)
+
+export const logTabVisibility = (data: {
+  session_id:      number | null
+  attempt_id:      number | null
+  hidden_at_ms:    number
+  visible_at_ms:   number
+  duration_ms:     number
+  was_mid_question: boolean
+  had_selection:   boolean
+}) => post('/events/tab-visibility', data)
 
 // Fire-and-forget wrapper — never blocks the UI
 export function fire(p: Promise<unknown>) {
