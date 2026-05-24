@@ -10,7 +10,6 @@ import PracticeSession from './components/PracticeSession'
 import QuickQuiz from './components/QuickQuiz'
 import LoginPage from './components/LoginPage'
 import OnboardingPage from './components/OnboardingPage'
-import DataView from './components/DataView'
 import InsightsScreen from './components/InsightsScreen'
 import * as api from './api'
 
@@ -19,7 +18,6 @@ const NAV = [
   { id: 'graph'     as Screen, label: 'Map',        icon: '◎' },
   { id: 'quiz'      as Screen, label: 'Quick Quiz', icon: '⚡' },
   { id: 'insights'  as Screen, label: 'Insights',   icon: '⚡' },
-  { id: 'data'      as Screen, label: 'Data',       icon: '◉' },
 ]
 
 function initialScreen(): Screen {
@@ -83,9 +81,6 @@ export default function App() {
           )}
           {state.screen === 'insights' && (
             <InsightsScreen />
-          )}
-          {state.screen === 'data' && (
-            <DataView />
           )}
         </div>
       </main>
