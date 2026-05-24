@@ -360,6 +360,7 @@ export default function PracticeSession({ topicId, onNav }: Props) {
         correct_count: score, accuracy: acc, xp_gained: totalXp,
         time_spent_on_analysis_ms: 0, steps_reviewed: 0,
       }))
+      api.fire(api.runAnalytics())
     }
 
     return (

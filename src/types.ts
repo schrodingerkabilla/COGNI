@@ -25,7 +25,7 @@ export interface Topic {
   history: TopicHistory[]
 }
 
-export type Screen = 'login' | 'onboarding' | 'dashboard' | 'graph' | 'topic' | 'practice' | 'quiz' | 'data'
+export type Screen = 'login' | 'onboarding' | 'dashboard' | 'graph' | 'topic' | 'practice' | 'quiz' | 'data' | 'insights'
 
 export interface AppState {
   screen: Screen

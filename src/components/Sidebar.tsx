@@ -10,6 +10,7 @@ const NAV = [
   { id: 'dashboard' as Screen, label: 'Dashboard',     icon: '⊞' },
   { id: 'graph'     as Screen, label: 'Knowledge Map', icon: '◎' },
   { id: 'quiz'      as Screen, label: 'Quick Quiz',    icon: '⚡' },
+  { id: 'insights'  as Screen, label: 'AI Insights',   icon: '⚡' },
   { id: 'data'      as Screen, label: 'Data Lake',     icon: '◉' },
 ]
 

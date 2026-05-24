@@ -24,8 +24,10 @@ async function get(path: string) {
 }
 
 // ── Topics ──────────────────────────────────────────────────
-export const getMyTopics  = () => get('/topics/me')
+export const getMyTopics   = () => get('/topics/me')
 export const getAdminStats = () => get('/admin/stats')
+export const runAnalytics  = () => post('/analytics/run', {})
+export const getMyAnalytics= () => get('/analytics/me')
 
 export const saveOnboarding = (topics: { topic_id: string; initial_confidence: number }[]) =>
   post('/topics/onboarding', { topics })

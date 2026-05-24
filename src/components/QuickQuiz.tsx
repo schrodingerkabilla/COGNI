@@ -277,6 +277,7 @@ export default function QuickQuiz({ onNav }: Props) {
           pendingHovers.current   = []
           pendingSwitches.current = []
           pendingReviews.current  = []
+          api.fire(api.runAnalytics())
         })
         .catch(console.warn)
     }
