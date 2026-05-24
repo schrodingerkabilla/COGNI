@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import type { AppState, Screen } from './types'
 import { INITIAL_STATE } from './data'
@@ -26,6 +26,9 @@ function initialScreen(): Screen {
 
 export default function App() {
   const [state, setState] = useState<AppState>({ ...INITIAL_STATE, screen: initialScreen() })
+
+  // Wake Render from sleep as early as possible
+  useEffect(() => { api.ping() }, [])
 
   function nav(screen: Screen, topicId?: string) {
     setState(s => ({ ...s, screen, activeTopicId: topicId ?? s.activeTopicId }))

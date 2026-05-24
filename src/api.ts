@@ -23,6 +23,22 @@ async function get(path: string) {
   return res.json()
 }
 
+// Retry up to `attempts` times with exponential back-off (1.5s, 3s, ...)
+export async function retrying<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown
+  for (let i = 0; i < attempts; i++) {
+    try { return await fn() }
+    catch (e) {
+      last = e
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 1500 * (i + 1)))
+    }
+  }
+  throw last
+}
+
+// Wake Render from sleep — call once on app start, no auth needed
+export const ping = () => fetch(API + '/').catch(() => {})
+
 // ── Topics ──────────────────────────────────────────────────
 export const getMyTopics   = () => get('/topics/me')
 export const getAdminStats      = () => get('/admin/stats')
@@ -41,6 +57,53 @@ export const startSession = (topic_id: string) =>
 
 export const getNextQuestion = (session_id: number) =>
   get(`/sessions/${session_id}/next`)
+
+export const logAttemptFull = (session_id: number, data: {
+  attempt: {
+    question_prompt: string
+    correct_answer: number
+    selected_answer: number | null
+    is_correct: boolean
+    pattern_id: string
+    strategy: string
+    time_to_answer_ms: number
+    time_to_first_interaction_ms: number
+    time_before_first_hover_ms: number
+    time_from_last_switch_to_submit_ms: number
+  }
+  hovers: {
+    option_value: number
+    hover_start_ms: number
+    hover_end_ms: number
+    hover_duration_ms: number
+    sequence_index: number
+    was_final_selection: boolean
+  }[]
+  switches: {
+    from_option: number
+    to_option: number
+    timestamp_ms: number
+    switch_number: number
+    time_since_last_switch_ms: number
+    time_since_question_shown_ms: number
+  }[]
+  reviews: {
+    review_number: number
+    review_start_ms: number
+    review_end_ms: number
+    review_duration_ms: number
+    option_hovered_during_review: boolean
+    changed_answer_after_review: boolean
+    answer_before_review: number | null
+    answer_after_review: number | null
+  }[]
+  hints: {
+    hint_type: string
+    pattern_id: string | null
+    strategy: string | null
+    time_before_answering_ms: number
+  }[]
+}) => post(`/sessions/${session_id}/attempt_full`, data)
 
 export const logAttempt = (session_id: number, data: {
   question_prompt: string

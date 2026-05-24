@@ -188,7 +188,7 @@ export default function QuickQuiz({ onNav }: Props) {
   useEffect(() => {
     async function init() {
       try {
-        const sd = await api.startSession('mixed')
+        const sd = await api.retrying(() => api.startSession('mixed'))
         sessionId.current = sd.session_id
         const qd = await api.getNextQuestion(sd.session_id)
         const topic = TOPICS.find(t => t.id === qd.topic_id) ?? TOPICS[0]
@@ -248,26 +248,30 @@ export default function QuickQuiz({ onNav }: Props) {
     setConf(init)
 
     if (sessionId.current) {
-      api.logAttempt(sessionId.current, {
-        question_prompt:                    q.prompt,
-        correct_answer:                     q.answer,
-        selected_answer:                    selected,
-        is_correct:                         selected === q.answer,
-        pattern_id:                         q.patternId,
-        strategy:                           q.strategy,
-        time_to_answer_ms:                  elapsed,
-        time_to_first_interaction_ms:       firstInter.current ? firstInter.current - qStartMs.current : elapsed,
-        time_before_first_hover_ms:         firstInter.current ? firstInter.current - qStartMs.current : elapsed,
-        time_from_last_switch_to_submit_ms: lastSwitchMs.current ? now - lastSwitchMs.current : 0,
-      })
+      const hovers   = [...pendingHovers.current]
+      const switches = [...pendingSwitches.current]
+      const reviews  = [...pendingReviews.current]
+      pendingHovers.current   = []
+      pendingSwitches.current = []
+      pendingReviews.current  = []
+
+      api.retrying(() => api.logAttemptFull(sessionId.current!, {
+        attempt: {
+          question_prompt:                    q.prompt,
+          correct_answer:                     q.answer,
+          selected_answer:                    selected,
+          is_correct:                         selected === q.answer,
+          pattern_id:                         q.patternId,
+          strategy:                           q.strategy,
+          time_to_answer_ms:                  elapsed,
+          time_to_first_interaction_ms:       firstInter.current ? firstInter.current - qStartMs.current : elapsed,
+          time_before_first_hover_ms:         firstInter.current ? firstInter.current - qStartMs.current : elapsed,
+          time_from_last_switch_to_submit_ms: lastSwitchMs.current ? now - lastSwitchMs.current : 0,
+        },
+        hovers, switches, reviews, hints: [],
+      }))
         .then(d => {
           attemptId.current = d.attempt_id
-          pendingHovers.current.forEach(e   => api.fire(api.logHover({   ...e, attempt_id: d.attempt_id })))
-          pendingSwitches.current.forEach(e => api.fire(api.logSwitch({  ...e, attempt_id: d.attempt_id })))
-          pendingReviews.current.forEach(e  => api.fire(api.logReview({  ...e, attempt_id: d.attempt_id })))
-          pendingHovers.current   = []
-          pendingSwitches.current = []
-          pendingReviews.current  = []
           api.fire(api.runAnalytics())
         })
         .catch(console.warn)

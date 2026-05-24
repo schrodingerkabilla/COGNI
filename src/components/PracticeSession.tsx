@@ -83,16 +83,6 @@ export default function PracticeSession({ topicId, onNav }: Props) {
   const q      = questions[qIdx]
   const animXp = useCountUp(totalXp, phase === 'done')
 
-  function flushBuffers(aid: number) {
-    pendingHovers.current.forEach(e   => api.fire(api.logHover({    ...e, attempt_id: aid })))
-    pendingSwitches.current.forEach(e => api.fire(api.logSwitch({   ...e, attempt_id: aid })))
-    pendingHints.current.forEach(e    => api.fire(api.logFocusHint({...e, attempt_id: aid })))
-    pendingReviews.current.forEach(e  => api.fire(api.logReview({   ...e, attempt_id: aid })))
-    pendingHovers.current   = []
-    pendingSwitches.current = []
-    pendingHints.current    = []
-    pendingReviews.current  = []
-  }
 
   function resetQTracking() {
     qStartMs.current           = Date.now()
@@ -116,7 +106,7 @@ export default function PracticeSession({ topicId, onNav }: Props) {
     let cancelled = false
     async function init() {
       try {
-        const sd = await api.startSession(topicId)
+        const sd = await api.retrying(() => api.startSession(topicId))
         if (cancelled) return
         sessionId.current = sd.session_id
         const qd = await api.getNextQuestion(sd.session_id)
@@ -283,22 +273,33 @@ export default function PracticeSession({ topicId, onNav }: Props) {
     if (!isRight && choice !== null) setPatErr(e => ({ ...e, [q.patternId]: (e[q.patternId] || 0) + 1 }))
 
     if (sessionId.current) {
-      api.logAttempt(sessionId.current, {
-        question_prompt:                    q.prompt,
-        correct_answer:                     q.answer,
-        selected_answer:                    choice,
-        is_correct:                         isRight,
-        pattern_id:                         q.patternId,
-        strategy:                           q.strategy,
-        time_to_answer_ms:                  elapsed,
-        time_to_first_interaction_ms:       firstInteractionMs.current ? firstInteractionMs.current - qStartMs.current : elapsed,
-        time_before_first_hover_ms:         firstHoverMs.current       ? firstHoverMs.current - qStartMs.current       : elapsed,
-        time_from_last_switch_to_submit_ms: lastSwitchMs.current       ? now - lastSwitchMs.current                    : 0,
-      })
+      const hovers   = [...pendingHovers.current]
+      const switches = [...pendingSwitches.current]
+      const reviews  = [...pendingReviews.current]
+      const hints    = [...pendingHints.current]
+      pendingHovers.current   = []
+      pendingSwitches.current = []
+      pendingReviews.current  = []
+      pendingHints.current    = []
+
+      api.retrying(() => api.logAttemptFull(sessionId.current!, {
+        attempt: {
+          question_prompt:                    q.prompt,
+          correct_answer:                     q.answer,
+          selected_answer:                    choice,
+          is_correct:                         isRight,
+          pattern_id:                         q.patternId,
+          strategy:                           q.strategy,
+          time_to_answer_ms:                  elapsed,
+          time_to_first_interaction_ms:       firstInteractionMs.current ? firstInteractionMs.current - qStartMs.current : elapsed,
+          time_before_first_hover_ms:         firstHoverMs.current       ? firstHoverMs.current - qStartMs.current       : elapsed,
+          time_from_last_switch_to_submit_ms: lastSwitchMs.current       ? now - lastSwitchMs.current                    : 0,
+        },
+        hovers, switches, reviews, hints,
+      }))
         .then(d => {
           attemptId.current = d.attempt_id
           setAttemptIds(ids => [...ids, d.attempt_id])
-          flushBuffers(d.attempt_id)
         })
         .catch(console.warn)
     }
@@ -345,7 +346,7 @@ export default function PracticeSession({ topicId, onNav }: Props) {
     setPhase('q')
     ;(async () => {
       try {
-        const sd = await api.startSession(topicId)
+        const sd = await api.retrying(() => api.startSession(topicId))
         sessionId.current = sd.session_id
         const qd = await api.getNextQuestion(sd.session_id)
         setQuestions([qd.question])
