@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { TOPICS } from '../data'
-import { generateQuestions } from '../utils/questionGen'
 import type { Question, SolutionStep } from '../utils/questionGen'
 import type { Screen } from '../types'
 import * as api from '../api'
@@ -15,13 +14,6 @@ interface QWithTopic {
   topicColor: string
   topicIcon: string
   topicName: string
-}
-
-function nextRandom(): QWithTopic {
-  const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)]
-  const questions = generateQuestions(topic.id, 6)
-  const q = questions[Math.floor(Math.random() * questions.length)]
-  return { q, topicId: topic.id, topicColor: topic.color, topicIcon: topic.icon, topicName: topic.name }
 }
 
 /* ── Transparent step box with draggable strength overlay ── */
@@ -67,7 +59,6 @@ function StepBox({
         cursor: 'ew-resize', userSelect: 'none', touchAction: 'none',
       }}
     >
-      {/* Step content */}
       <div style={{ padding: '14px 16px', position: 'relative', zIndex: 1, pointerEvents: 'none' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <div style={{
@@ -99,23 +90,17 @@ function StepBox({
           </div>
         </div>
       </div>
-
-      {/* Transparent fill overlay */}
       <div style={{
         position: 'absolute', top: 0, bottom: 0, left: 0,
         width: `${value}%`, background: `${barColor}18`,
         zIndex: 2, pointerEvents: 'none', transition: 'background 0.3s',
       }} />
-
-      {/* Vertical drag line */}
       <div style={{
         position: 'absolute', top: 0, bottom: 0, left: `${value}%`, width: 2,
         background: `linear-gradient(180deg, transparent 0%, ${barColor}90 20%, ${barColor} 50%, ${barColor}90 80%, transparent 100%)`,
         boxShadow: `0 0 10px ${barColor}60`,
         zIndex: 3, pointerEvents: 'none', transform: 'translateX(-1px)',
       }} />
-
-      {/* Strength pill on handle */}
       <div style={{
         position: 'absolute', top: '50%', left: `${value}%`,
         transform: 'translate(-50%, -50%)',
@@ -133,7 +118,6 @@ function StepBox({
 function FocusHint({ current }: { current: QWithTopic }) {
   const topic  = TOPICS.find(t => t.id === current.topicId)
   const weak   = topic?.weakPatterns.find(p => p.id === current.q.patternId)
-
   const isWeak = !!weak
   const label  = weak ? weak.name : current.q.strategy
   const desc   = weak ? `Appears in ${weak.frequency}% of your mistakes` : 'Key technique for this problem type'
@@ -170,14 +154,14 @@ function FocusHint({ current }: { current: QWithTopic }) {
 
 /* ── Main component ────────────────────────────────────── */
 export default function QuickQuiz({ onNav }: Props) {
-  const [current,   setCurrent]  = useState<QWithTopic>(nextRandom)
-  const [selected,  setSel]      = useState<number | null>(null)   // current pick
-  const [confirmed, setConfirmed]= useState<number | null>(null)   // locked-in answer
+  // ─── State / refs ─────────────────────────────────────────
+  const [current,   setCurrent]  = useState<QWithTopic | null>(null)
+  const [selected,  setSel]      = useState<number | null>(null)
+  const [confirmed, setConfirmed]= useState<number | null>(null)
   const [correct,   setCorrect]  = useState(0)
   const [total,     setTotal]    = useState(0)
   const [conf,      setConf]     = useState<Record<string, number>>({})
-
-  const [reviewOpen,    setReviewOpen]    = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
 
   const sessionId    = useRef<number | null>(null)
   const attemptId    = useRef<number | null>(null)
@@ -188,30 +172,38 @@ export default function QuickQuiz({ onNav }: Props) {
   const switchCount  = useRef(0)
   const lastSwitchMs = useRef<number | null>(null)
   const tabHideMs    = useRef<number | null>(null)
-  const reviewCount     = useRef(0)
-  const reviewStartMs   = useRef<number | null>(null)
-  const reviewSelAtStart= useRef<number | null>(null)
-  const pendingHovers   = useRef<Omit<Parameters<typeof api.logHover>[0],'attempt_id'>[]>([])
-  const pendingSwitches = useRef<Omit<Parameters<typeof api.logSwitch>[0],'attempt_id'>[]>([])
-  const pendingReviews  = useRef<Omit<Parameters<typeof api.logReview>[0],'attempt_id'>[]>([])
+  const reviewCount      = useRef(0)
+  const reviewStartMs    = useRef<number | null>(null)
+  const reviewSelAtStart = useRef<number | null>(null)
+  const pendingHovers    = useRef<Omit<Parameters<typeof api.logHover>[0],'attempt_id'>[]>([])
+  const pendingSwitches  = useRef<Omit<Parameters<typeof api.logSwitch>[0],'attempt_id'>[]>([])
+  const pendingReviews   = useRef<Omit<Parameters<typeof api.logReview>[0],'attempt_id'>[]>([])
 
-  useState(() => {
-    api.startSession('mixed')
-      .then(d => { sessionId.current = d.session_id })
-      .catch(console.warn)
-  })
-
-  const { q, topicColor, topicIcon, topicName } = current
+  // ─── Null-safe derived values (used by hooks) ─────────────
+  const q        = current?.q ?? null
   const revealed = confirmed !== null
-  const isRight  = confirmed === q.answer
+  const isRight  = q != null && confirmed === q.answer
 
-  // Select an option (no reveal yet — can switch)
+  // ─── Session init — start session and fetch first question ─
+  useEffect(() => {
+    async function init() {
+      try {
+        const sd = await api.startSession('mixed')
+        sessionId.current = sd.session_id
+        const qd = await api.getNextQuestion(sd.session_id)
+        const topic = TOPICS.find(t => t.id === qd.topic_id) ?? TOPICS[0]
+        setCurrent({ q: qd.question, topicId: topic.id, topicColor: topic.color, topicIcon: topic.icon, topicName: topic.name })
+      } catch (e) { console.warn(e) }
+    }
+    init()
+  }, [])
+
+  // ─── Select ───────────────────────────────────────────────
   const select = useCallback((choice: number) => {
     if (revealed) return
     const now = Date.now()
     if (!firstInter.current) firstInter.current = now
 
-    // close any open hover
     if (hoverStart.current) {
       const startMs  = hoverStart.current.ms
       const relStart = startMs - qStartMs.current
@@ -227,7 +219,6 @@ export default function QuickQuiz({ onNav }: Props) {
       hoverStart.current = null
     }
 
-    // track switch if changing selection
     if (selected !== null && selected !== choice) {
       pendingSwitches.current.push({
         from_option:                  selected,
@@ -243,9 +234,9 @@ export default function QuickQuiz({ onNav }: Props) {
     setSel(choice)
   }, [revealed, selected])
 
-  // Confirm the selected answer — this is the real submit
+  // ─── Confirm ─────────────────────────────────────────────
   const confirm = useCallback(() => {
-    if (!selected || revealed) return
+    if (!selected || revealed || !q) return
     const now     = Date.now()
     const elapsed = now - qStartMs.current
 
@@ -283,7 +274,9 @@ export default function QuickQuiz({ onNav }: Props) {
     }
   }, [selected, revealed, q])
 
-  const next = useCallback(() => {
+  // ─── Next question ────────────────────────────────────────
+  const next = useCallback(async () => {
+    setCurrent(null)
     setSel(null)
     setConfirmed(null)
     setConf({})
@@ -299,9 +292,16 @@ export default function QuickQuiz({ onNav }: Props) {
     pendingHovers.current  = []
     pendingSwitches.current= []
     pendingReviews.current = []
-    setCurrent(nextRandom())
+    if (sessionId.current) {
+      try {
+        const qd = await api.getNextQuestion(sessionId.current)
+        const topic = TOPICS.find(t => t.id === qd.topic_id) ?? TOPICS[0]
+        setCurrent({ q: qd.question, topicId: topic.id, topicColor: topic.color, topicIcon: topic.icon, topicName: topic.name })
+      } catch (e) { console.warn(e) }
+    }
   }, [])
 
+  // ─── Step confidence ──────────────────────────────────────
   const setStepConf = useCallback((id: string, v: number) => {
     setConf(c => ({ ...c, [id]: v }))
     if (attemptId.current) {
@@ -319,6 +319,7 @@ export default function QuickQuiz({ onNav }: Props) {
     }
   }, [conf])
 
+  // ─── Hover tracking ───────────────────────────────────────
   const onHoverEnter = useCallback((choice: number) => {
     if (revealed) return
     const now = Date.now()
@@ -343,7 +344,7 @@ export default function QuickQuiz({ onNav }: Props) {
     })
   }, [revealed])
 
-  // ── Tab visibility ────────────────────────────────────────
+  // ─── Tab visibility ───────────────────────────────────────
   useEffect(() => {
     const onVisChange = () => {
       if (document.hidden) {
@@ -371,7 +372,7 @@ export default function QuickQuiz({ onNav }: Props) {
     return () => document.removeEventListener('visibilitychange', onVisChange)
   }, [revealed, selected])
 
-  // ── Review helpers ────────────────────────────────────────
+  // ─── Review helpers ───────────────────────────────────────
   function openReview() {
     if (selected === null || revealed) return
     reviewStartMs.current    = Date.now()
@@ -398,8 +399,19 @@ export default function QuickQuiz({ onNav }: Props) {
     setReviewOpen(false)
   }
 
+  // ─── Computed ────────────────────────────────────────────
   const acc = total === 0 ? 100 : Math.round((correct / total) * 100)
   const accColor = acc >= 75 ? '#06d6a0' : acc >= 50 ? '#f59e0b' : '#ff3d6b'
+
+  // ─── Loading guard (all hooks are above this line) ────────
+  if (!current) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'rgba(140,200,255,0.45)', fontSize: 14 }}>
+      Loading question…
+    </div>
+  )
+
+  // current is non-null from here on
+  const { q: cq, topicColor, topicIcon, topicName } = current
 
   return (
     <div className="content-scroll" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 24 }}>
@@ -447,15 +459,15 @@ export default function QuickQuiz({ onNav }: Props) {
           fontSize: 34, fontWeight: 900, color: '#e8f4ff', textAlign: 'center',
           letterSpacing: '-0.5px', lineHeight: 1.2, paddingBottom: 4,
         }}>
-          {q.prompt}
+          {cq.prompt}
         </div>
       </div>
 
       {/* Choices 2×2 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%', maxWidth: 560, marginBottom: 12 }}>
-        {q.choices.map(choice => {
+        {cq.choices.map(choice => {
           const isSel = selected === choice
-          const isAns = choice === q.answer
+          const isAns = choice === cq.answer
 
           let bg     = 'rgba(0,100,255,0.07)'
           let border = 'rgba(0,150,255,0.2)'
@@ -560,7 +572,7 @@ export default function QuickQuiz({ onNav }: Props) {
               {topicIcon} {topicName} · Re-read
             </div>
             <div style={{ fontSize: 36, fontWeight: 900, color: '#e8f4ff', letterSpacing: '-0.5px', lineHeight: 1.2, marginBottom: 32 }}>
-              {q.prompt}
+              {cq.prompt}
             </div>
             <button onClick={closeReview} className="btn-primary" style={{ justifyContent: 'center', fontSize: 14 }}>
               Back to Answering →
@@ -583,7 +595,7 @@ export default function QuickQuiz({ onNav }: Props) {
             <span style={{ fontSize: 20 }}>{isRight ? '✓' : '✗'}</span>
             <div>
               <div style={{ fontSize: 14, fontWeight: 800, color: isRight ? '#06d6a0' : '#ff3d6b' }}>
-                {isRight ? 'Correct!' : `Answer: ${q.answer}`}
+                {isRight ? 'Correct!' : `Answer: ${cq.answer}`}
               </div>
               {!isRight && (
                 <div style={{ fontSize: 12, color: 'rgba(180,220,255,0.5)', marginTop: 2 }}>
@@ -597,7 +609,7 @@ export default function QuickQuiz({ onNav }: Props) {
               background: `${topicColor}18`, border: `1px solid ${topicColor}35`,
               fontSize: 11, fontWeight: 700, color: topicColor, whiteSpace: 'nowrap',
             }}>
-              {q.strategy}
+              {cq.strategy}
             </div>
           </div>
 
@@ -610,7 +622,7 @@ export default function QuickQuiz({ onNav }: Props) {
               Quickest Way
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {q.steps.map((step, i) => (
+              {cq.steps.map((step, i) => (
                 <StepBox
                   key={i}
                   step={step}

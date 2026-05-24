@@ -36,6 +36,9 @@ export const saveOnboarding = (topics: { topic_id: string; initial_confidence: n
 export const startSession = (topic_id: string) =>
   post('/sessions/start', { topic_id })
 
+export const getNextQuestion = (session_id: number) =>
+  get(`/sessions/${session_id}/next`)
+
 export const logAttempt = (session_id: number, data: {
   question_prompt: string
   correct_answer: number

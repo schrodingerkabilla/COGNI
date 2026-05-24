@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TOPICS } from '../data'
-import { generateQuestions } from '../utils/questionGen'
+import type { Question } from '../utils/questionGen'
 import type { Screen } from '../types'
 import AnalysisScreen from './AnalysisScreen'
 import * as api from '../api'
@@ -39,7 +39,7 @@ type PendingReview = Omit<Parameters<typeof api.logReview>[0],      'attempt_id'
 export default function PracticeSession({ topicId, onNav }: Props) {
   const topic = TOPICS.find(t => t.id === topicId)
 
-  const [questions,  setQuestions]  = useState(() => generateQuestions(topicId, TOTAL_Q))
+  const [questions,  setQuestions]  = useState<Question[]>([])
   const [qIdx,       setQIdx]       = useState(0)
   const [phase,      setPhase]      = useState<'q' | 'fb' | 'done' | 'analysis'>('q')
   const [selected,   setSel]        = useState<number | null>(null)  // highlighted pick
@@ -111,11 +111,21 @@ export default function PracticeSession({ topicId, onNav }: Props) {
     pendingReviews.current     = []
   }
 
-  // Start backend session on mount
+  // Start backend session on mount and fetch first question
   useEffect(() => {
-    api.startSession(topicId)
-      .then(d => { sessionId.current = d.session_id })
-      .catch(console.warn)
+    let cancelled = false
+    async function init() {
+      try {
+        const sd = await api.startSession(topicId)
+        if (cancelled) return
+        sessionId.current = sd.session_id
+        const qd = await api.getNextQuestion(sd.session_id)
+        if (cancelled) return
+        setQuestions([qd.question])
+      } catch (e) { console.warn(e) }
+    }
+    init()
+    return () => { cancelled = true }
   }, [topicId])
 
   // Reset tracking on each new question
@@ -123,15 +133,15 @@ export default function PracticeSession({ topicId, onNav }: Props) {
 
   // Buffer focus hint when question appears
   useEffect(() => {
-    if (phase !== 'q') return
-    const weak = topic?.weakPatterns.find(p => p.id === q?.patternId)
+    if (phase !== 'q' || !q) return
+    const weak = topic?.weakPatterns.find(p => p.id === q.patternId)
     pendingHints.current.push({
       hint_type:                weak ? 'weak_area' : 'focus_point',
       pattern_id:               weak?.id ?? null,
-      strategy:                 weak ? null : q?.strategy ?? null,
+      strategy:                 weak ? null : q.strategy ?? null,
       time_before_answering_ms: 0,
     })
-  }, [qIdx, phase])
+  }, [qIdx, phase, q])
 
   // ── Tab visibility ────────────────────────────────────────
   useEffect(() => {
@@ -252,7 +262,7 @@ export default function PracticeSession({ topicId, onNav }: Props) {
 
   // ── Confirm (final submit — triggers reveal) ─────────────
   const confirm = useCallback((forceChoice?: number | null) => {
-    if (phase !== 'q' || busy.current) return
+    if (phase !== 'q' || busy.current || !q) return
     busy.current = true
 
     const choice  = forceChoice !== undefined ? forceChoice : selected
@@ -293,26 +303,39 @@ export default function PracticeSession({ topicId, onNav }: Props) {
         .catch(console.warn)
     }
 
+    const nextIdx = qIdx + 1
+
+    // Fetch next question during the feedback window
+    if (nextIdx < TOTAL_Q && sessionId.current) {
+      const sid = sessionId.current
+      api.getNextQuestion(sid)
+        .then(d => setQuestions(qs => {
+          const copy = [...qs]
+          copy[nextIdx] = d.question
+          return copy
+        }))
+        .catch(console.warn)
+    }
+
     setTimeout(() => {
       busy.current = false
-      const next = qIdx + 1
-      if (next >= TOTAL_Q) { setPhase('done'); return }
-      setQIdx(next)
+      if (nextIdx >= TOTAL_Q) { setPhase('done'); return }
+      setQIdx(nextIdx)
       setSel(null); setConfirmed(null); setTimer(TIMER_SEC)
       setPhase('q')
     }, FEEDBACK_MS)
   }, [phase, selected, q, qIdx])
 
-  // countdown — auto-confirm on 0
+  // countdown — auto-confirm on 0, paused while question is loading
   useEffect(() => {
-    if (phase !== 'q') return
+    if (phase !== 'q' || !q) return
     if (timer <= 0) { confirm(selected ?? null); return }
     const id = setTimeout(() => setTimer(t => t - 1), 1000)
     return () => clearTimeout(id)
-  }, [timer, phase, confirm, selected])
+  }, [timer, phase, confirm, selected, q])
 
   const resetSession = useCallback(() => {
-    setQuestions(generateQuestions(topicId, TOTAL_Q))
+    setQuestions([])
     setQIdx(0); setSel(null); setConfirmed(null)
     setScore(0); setXp(0); setPatErr({}); setTimes([]); setAnswers([]); setAttemptIds([])
     setTimer(TIMER_SEC)
@@ -320,12 +343,22 @@ export default function PracticeSession({ topicId, onNav }: Props) {
     analysisStartMs.current = 0
     resetQTracking()
     setPhase('q')
-    api.startSession(topicId)
-      .then(d => { sessionId.current = d.session_id })
-      .catch(console.warn)
+    ;(async () => {
+      try {
+        const sd = await api.startSession(topicId)
+        sessionId.current = sd.session_id
+        const qd = await api.getNextQuestion(sd.session_id)
+        setQuestions([qd.question])
+      } catch (e) { console.warn(e) }
+    })()
   }, [topicId])
 
-  if (!topic || !q) return null
+  if (!topic) return null
+  if (!q) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'rgba(140,200,255,0.45)', fontSize: 14 }}>
+      Loading question…
+    </div>
+  )
 
   const revealed  = confirmed !== null
   const isCorrect = confirmed === q.answer
