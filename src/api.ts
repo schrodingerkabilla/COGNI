@@ -28,6 +28,7 @@ export const getMyTopics   = () => get('/topics/me')
 export const getAdminStats = () => get('/admin/stats')
 export const runAnalytics  = () => post('/analytics/run', {})
 export const getMyAnalytics= () => get('/analytics/me')
+export const getMyTensor   = () => get('/analytics/me/tensor')
 
 export const saveOnboarding = (topics: { topic_id: string; initial_confidence: number }[]) =>
   post('/topics/onboarding', { topics })
