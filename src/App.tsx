@@ -31,13 +31,19 @@ export default function App() {
     setState(s => ({ ...s, screen: 'topic', activeTopicId: id }))
   }
 
+  function logout() {
+    localStorage.removeItem('cogni_token')
+    localStorage.removeItem('cogni_user_id')
+    setState(s => ({ ...s, screen: 'login' }))
+  }
+
   if (state.screen === 'login') {
     return <LoginPage onNav={nav} />
   }
 
   return (
     <div className="app-layout">
-      <Sidebar screen={state.screen} onNav={nav} />
+      <Sidebar screen={state.screen} onNav={nav} onLogout={logout} />
 
       <main className="app-main">
         <div key={state.screen + (state.activeTopicId ?? '')} className="screen-enter">

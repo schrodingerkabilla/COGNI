@@ -3,6 +3,7 @@ import { TOPICS } from '../data'
 import { generateQuestions } from '../utils/questionGen'
 import type { Question, SolutionStep } from '../utils/questionGen'
 import type { Screen } from '../types'
+import * as api from '../api'
 
 interface Props {
   onNav: (s: Screen) => void
@@ -169,36 +170,166 @@ function FocusHint({ current }: { current: QWithTopic }) {
 
 /* ── Main component ────────────────────────────────────── */
 export default function QuickQuiz({ onNav }: Props) {
-  const [current, setCurrent]  = useState<QWithTopic>(nextRandom)
-  const [selected, setSel]     = useState<number | null>(null)
-  const [correct,  setCorrect] = useState(0)
-  const [total,    setTotal]   = useState(0)
-  const [conf, setConf]        = useState<Record<string, number>>({})
+  const [current,   setCurrent]  = useState<QWithTopic>(nextRandom)
+  const [selected,  setSel]      = useState<number | null>(null)   // current pick
+  const [confirmed, setConfirmed]= useState<number | null>(null)   // locked-in answer
+  const [correct,   setCorrect]  = useState(0)
+  const [total,     setTotal]    = useState(0)
+  const [conf,      setConf]     = useState<Record<string, number>>({})
+
+  const sessionId    = useRef<number | null>(null)
+  const attemptId    = useRef<number | null>(null)
+  const qStartMs     = useRef(Date.now())
+  const firstInter   = useRef<number | null>(null)
+  const hoverStart   = useRef<{ option: number; ms: number } | null>(null)
+  const hoverSeq     = useRef(0)
+  const switchCount  = useRef(0)
+  const lastSwitchMs = useRef<number | null>(null)
+  const pendingHovers= useRef<Omit<Parameters<typeof api.logHover>[0],'attempt_id'>[]>([])
+  const pendingSwitches = useRef<Omit<Parameters<typeof api.logSwitch>[0],'attempt_id'>[]>([])
+
+  useState(() => {
+    api.startSession('mixed')
+      .then(d => { sessionId.current = d.session_id })
+      .catch(console.warn)
+  })
 
   const { q, topicColor, topicIcon, topicName } = current
-  const revealed = selected !== null
-  const isRight  = selected === q.answer
+  const revealed = confirmed !== null
+  const isRight  = confirmed === q.answer
 
-  const submit = useCallback((choice: number) => {
+  // Select an option (no reveal yet — can switch)
+  const select = useCallback((choice: number) => {
     if (revealed) return
+    const now = Date.now()
+    if (!firstInter.current) firstInter.current = now
+
+    // close any open hover
+    if (hoverStart.current) {
+      const startMs  = hoverStart.current.ms
+      const relStart = startMs - qStartMs.current
+      const duration = now - startMs
+      pendingHovers.current.push({
+        option_value:        hoverStart.current.option,
+        hover_start_ms:      relStart,
+        hover_end_ms:        relStart + duration,
+        hover_duration_ms:   duration,
+        sequence_index:      ++hoverSeq.current,
+        was_final_selection: choice === hoverStart.current.option,
+      })
+      hoverStart.current = null
+    }
+
+    // track switch if changing selection
+    if (selected !== null && selected !== choice) {
+      pendingSwitches.current.push({
+        from_option:                  selected,
+        to_option:                    choice,
+        timestamp_ms:                 now - qStartMs.current,
+        switch_number:                ++switchCount.current,
+        time_since_last_switch_ms:    lastSwitchMs.current ? now - lastSwitchMs.current : 0,
+        time_since_question_shown_ms: now - qStartMs.current,
+      })
+      lastSwitchMs.current = now
+    }
+
     setSel(choice)
+  }, [revealed, selected])
+
+  // Confirm the selected answer — this is the real submit
+  const confirm = useCallback(() => {
+    if (!selected || revealed) return
+    const now     = Date.now()
+    const elapsed = now - qStartMs.current
+
+    setConfirmed(selected)
     setTotal(t => t + 1)
-    setCorrect(c => c + (choice === q.answer ? 1 : 0))
-    // init confidence for each step at 100
+    setCorrect(c => c + (selected === q.answer ? 1 : 0))
     const init: Record<string, number> = {}
     q.steps.forEach((_, i) => { init[String(i)] = 100 })
     setConf(init)
-  }, [revealed, q])
+
+    if (sessionId.current) {
+      api.logAttempt(sessionId.current, {
+        question_prompt:                    q.prompt,
+        correct_answer:                     q.answer,
+        selected_answer:                    selected,
+        is_correct:                         selected === q.answer,
+        pattern_id:                         q.patternId,
+        strategy:                           q.strategy,
+        time_to_answer_ms:                  elapsed,
+        time_to_first_interaction_ms:       firstInter.current ? firstInter.current - qStartMs.current : elapsed,
+        time_before_first_hover_ms:         firstInter.current ? firstInter.current - qStartMs.current : elapsed,
+        time_from_last_switch_to_submit_ms: lastSwitchMs.current ? now - lastSwitchMs.current : 0,
+      })
+        .then(d => {
+          attemptId.current = d.attempt_id
+          // flush all buffered events
+          pendingHovers.current.forEach(e   => api.fire(api.logHover({   ...e, attempt_id: d.attempt_id })))
+          pendingSwitches.current.forEach(e => api.fire(api.logSwitch({  ...e, attempt_id: d.attempt_id })))
+          pendingHovers.current   = []
+          pendingSwitches.current = []
+        })
+        .catch(console.warn)
+    }
+  }, [selected, revealed, q])
 
   const next = useCallback(() => {
     setSel(null)
+    setConfirmed(null)
     setConf({})
+    qStartMs.current      = Date.now()
+    firstInter.current    = null
+    hoverStart.current    = null
+    hoverSeq.current      = 0
+    switchCount.current   = 0
+    lastSwitchMs.current  = null
+    attemptId.current     = null
+    pendingHovers.current = []
+    pendingSwitches.current = []
     setCurrent(nextRandom())
   }, [])
 
   const setStepConf = useCallback((id: string, v: number) => {
     setConf(c => ({ ...c, [id]: v }))
-  }, [])
+    if (attemptId.current) {
+      api.fire(api.logStrength({
+        attempt_id:            attemptId.current,
+        step_index:            Number(id),
+        old_value:             conf[id] ?? 100,
+        new_value:             v,
+        timestamp_ms:          Date.now() - qStartMs.current,
+        drag_count:            1,
+        time_to_first_drag_ms: 0,
+        time_between_drags_ms: 0,
+        total_time_on_step_ms: 0,
+      }))
+    }
+  }, [conf])
+
+  const onHoverEnter = useCallback((choice: number) => {
+    if (revealed) return
+    const now = Date.now()
+    if (!firstInter.current) firstInter.current = now
+    hoverStart.current = { option: choice, ms: now }
+  }, [revealed])
+
+  const onHoverLeave = useCallback((choice: number) => {
+    if (revealed || !hoverStart.current || hoverStart.current.option !== choice) return
+    const now      = Date.now()
+    const startMs  = hoverStart.current.ms
+    const relStart = startMs - qStartMs.current
+    const duration = now - startMs
+    hoverStart.current = null
+    pendingHovers.current.push({
+      option_value:        choice,
+      hover_start_ms:      relStart,
+      hover_end_ms:        relStart + duration,
+      hover_duration_ms:   duration,
+      sequence_index:      ++hoverSeq.current,
+      was_final_selection: false,
+    })
+  }, [revealed])
 
   const acc = total === 0 ? 100 : Math.round((correct / total) * 100)
   const accColor = acc >= 75 ? '#06d6a0' : acc >= 50 ? '#f59e0b' : '#ff3d6b'
@@ -254,7 +385,7 @@ export default function QuickQuiz({ onNav }: Props) {
       </div>
 
       {/* Choices 2×2 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%', maxWidth: 560, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%', maxWidth: 560, marginBottom: 12 }}>
         {q.choices.map(choice => {
           const isSel = selected === choice
           const isAns = choice === q.answer
@@ -272,12 +403,15 @@ export default function QuickQuiz({ onNav }: Props) {
             shadow = '0 0 24px rgba(255,61,107,0.3)'
           } else if (revealed) {
             bg = 'rgba(0,100,255,0.04)'; border = 'rgba(0,150,255,0.1)'; color = 'rgba(180,220,255,0.3)'
+          } else if (isSel) {
+            bg = 'rgba(0,150,255,0.18)'; border = '#00c8ff'; color = '#e8f4ff'
+            shadow = '0 0 18px rgba(0,200,255,0.25)'
           }
 
           return (
             <button
               key={choice}
-              onClick={() => submit(choice)}
+              onClick={() => select(choice)}
               disabled={revealed}
               style={{
                 padding: '22px 16px', borderRadius: 14,
@@ -289,17 +423,19 @@ export default function QuickQuiz({ onNav }: Props) {
                 transition: 'all 0.18s ease',
               }}
               onMouseEnter={e => {
-                if (!revealed) {
-                  e.currentTarget.style.background = 'rgba(0,150,255,0.15)'
-                  e.currentTarget.style.borderColor = 'rgba(0,200,255,0.45)'
+                if (!revealed && !isSel) {
+                  e.currentTarget.style.background = 'rgba(0,150,255,0.12)'
+                  e.currentTarget.style.borderColor = 'rgba(0,200,255,0.35)'
                   e.currentTarget.style.transform = 'translateY(-2px)'
+                  onHoverEnter(choice)
                 }
               }}
               onMouseLeave={e => {
-                if (!revealed) {
+                if (!revealed && !isSel) {
                   e.currentTarget.style.background = 'rgba(0,100,255,0.07)'
                   e.currentTarget.style.borderColor = 'rgba(0,150,255,0.2)'
                   e.currentTarget.style.transform = 'translateY(0)'
+                  onHoverLeave(choice)
                 }
               }}
             >
@@ -308,6 +444,20 @@ export default function QuickQuiz({ onNav }: Props) {
           )
         })}
       </div>
+
+      {/* Confirm button — appears once an option is selected */}
+      {!revealed && selected !== null && (
+        <button
+          className="btn-primary"
+          onClick={confirm}
+          style={{ width: '100%', maxWidth: 560, justifyContent: 'center', marginBottom: 16, fontSize: 15 }}
+        >
+          Confirm Answer →
+        </button>
+      )}
+      {!revealed && selected === null && (
+        <div style={{ height: 16, marginBottom: 16 }} />
+      )}
 
       {/* ── Inline solution widget ── */}
       {revealed && (

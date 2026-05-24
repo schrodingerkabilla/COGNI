@@ -1,13 +1,16 @@
 import { useState, useRef, useCallback } from 'react'
 import type { Question, SolutionStep } from '../utils/questionGen'
+import * as api from '../api'
 
 interface Props {
-  questions: Question[]
-  answers: (number | null)[]
-  topicName: string
-  topicIcon: string
+  questions:  Question[]
+  answers:    (number | null)[]
+  topicName:  string
+  topicIcon:  string
   topicColor: string
-  onBack: () => void
+  onBack:     () => void
+  sessionId:  number | null
+  attemptIds: number[]   // real attempt_id per question index
 }
 
 function StepBox({
@@ -162,16 +165,46 @@ function StepBox({
   )
 }
 
-export default function AnalysisScreen({ questions, answers, topicName, topicIcon, topicColor, onBack }: Props) {
+export default function AnalysisScreen({ questions, answers, topicName, topicIcon, topicColor, onBack, attemptIds }: Props) {
   const [conf, setConf] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {}
     questions.forEach((q, qi) => q.steps.forEach((_, si) => { init[`${qi}-${si}`] = 100 }))
     return init
   })
 
+  // Track drag timing per step
+  const stepFirstDrag  = useRef<Record<string, number>>({})
+  const stepLastDrag   = useRef<Record<string, number>>({})
+  const stepDragCount  = useRef<Record<string, number>>({})
+  const stepStartTime  = useRef(Date.now())
+
   const onChange = useCallback((key: string, v: number) => {
+    const now     = Date.now()
+    const old     = conf[key] ?? 100
+    const [qi, si] = key.split('-').map(Number)
+
+    if (!stepFirstDrag.current[key])  stepFirstDrag.current[key]  = now
+    const between = stepLastDrag.current[key] ? now - stepLastDrag.current[key] : 0
+    stepLastDrag.current[key]  = now
+    stepDragCount.current[key] = (stepDragCount.current[key] ?? 0) + 1
+
     setConf(c => ({ ...c, [key]: v }))
-  }, [])
+
+    const realAttemptId = attemptIds[qi]
+    if (realAttemptId) {
+      api.fire(api.logStrength({
+        attempt_id:            realAttemptId,
+        step_index:            si,
+        old_value:             old,
+        new_value:             v,
+        timestamp_ms:          now - stepStartTime.current,
+        drag_count:            stepDragCount.current[key],
+        time_to_first_drag_ms: stepFirstDrag.current[key] - stepStartTime.current,
+        time_between_drags_ms: between,
+        total_time_on_step_ms: now - (stepFirstDrag.current[key] ?? now),
+      }))
+    }
+  }, [conf, sessionId])
 
   const allVals = Object.values(conf)
   const overallConf = Math.round(allVals.reduce((a, b) => a + b, 0) / Math.max(1, allVals.length))

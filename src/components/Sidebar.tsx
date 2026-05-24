@@ -3,6 +3,7 @@ import type { Screen } from '../types'
 interface Props {
   screen: Screen
   onNav: (s: Screen) => void
+  onLogout: () => void
 }
 
 const NAV = [
@@ -11,7 +12,7 @@ const NAV = [
   { id: 'quiz'      as Screen, label: 'Quick Quiz',  icon: '⚡' },
 ]
 
-export default function Sidebar({ screen, onNav }: Props) {
+export default function Sidebar({ screen, onNav, onLogout }: Props) {
   return (
     <aside className="layout-sidebar">
       <div style={{ padding: '4px 14px 24px' }}>
@@ -51,10 +52,21 @@ export default function Sidebar({ screen, onNav }: Props) {
           fontSize: 14, fontWeight: 800, color: '#fff',
           flexShrink: 0, boxShadow: '0 0 16px rgba(0,150,255,0.6)',
         }}>J</div>
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#e8f4ff' }}>Student</div>
           <div style={{ fontSize: 11, color: 'rgba(0,190,255,0.55)', fontWeight: 500 }}>Level 7 · 6870 XP</div>
         </div>
+        <button
+          onClick={onLogout}
+          title="Logout"
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'rgba(255,61,107,0.5)', fontSize: 16, padding: 4,
+            lineHeight: 1, flexShrink: 0,
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#ff3d6b')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,61,107,0.5)')}
+        >⏻</button>
       </div>
     </aside>
   )
