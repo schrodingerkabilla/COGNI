@@ -8,6 +8,7 @@ import KnowledgeGraph from './components/KnowledgeGraph'
 import TopicDetail from './components/TopicDetail'
 import PracticeSession from './components/PracticeSession'
 import QuickQuiz from './components/QuickQuiz'
+import LoginPage from './components/LoginPage'
 
 const NAV = [
   { id: 'dashboard' as Screen, label: 'Dashboard', icon: '⊞' },
@@ -15,8 +16,12 @@ const NAV = [
   { id: 'quiz'      as Screen, label: 'Quick Quiz', icon: '⚡' },
 ]
 
+function initialScreen(): Screen {
+  return localStorage.getItem('cogni_token') ? 'dashboard' : 'login'
+}
+
 export default function App() {
-  const [state, setState] = useState<AppState>(INITIAL_STATE)
+  const [state, setState] = useState<AppState>({ ...INITIAL_STATE, screen: initialScreen() })
 
   function nav(screen: Screen, topicId?: string) {
     setState(s => ({ ...s, screen, activeTopicId: topicId ?? s.activeTopicId }))
@@ -26,14 +31,15 @@ export default function App() {
     setState(s => ({ ...s, screen: 'topic', activeTopicId: id }))
   }
 
+  if (state.screen === 'login') {
+    return <LoginPage onNav={nav} />
+  }
+
   return (
     <div className="app-layout">
-      {/* Sidebar — desktop only (CSS hides on mobile) */}
       <Sidebar screen={state.screen} onNav={nav} />
 
-      {/* Main content */}
       <main className="app-main">
-        {/* key triggers re-mount → replays screenEnter animation */}
         <div key={state.screen + (state.activeTopicId ?? '')} className="screen-enter">
           {state.screen === 'dashboard' && (
             <Dashboard state={state} onTopicClick={openTopic} />
@@ -53,7 +59,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* Bottom nav — mobile only (CSS hides on desktop) */}
       <nav className="bottom-nav">
         {NAV.map(item => (
           <button
