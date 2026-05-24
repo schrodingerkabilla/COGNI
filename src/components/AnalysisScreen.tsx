@@ -204,7 +204,7 @@ export default function AnalysisScreen({ questions, answers, topicName, topicIco
         total_time_on_step_ms: now - (stepFirstDrag.current[key] ?? now),
       }))
     }
-  }, [conf, sessionId])
+  }, [conf, attemptIds])
 
   const allVals = Object.values(conf)
   const overallConf = Math.round(allVals.reduce((a, b) => a + b, 0) / Math.max(1, allVals.length))
