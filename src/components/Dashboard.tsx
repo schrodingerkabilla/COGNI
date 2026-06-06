@@ -60,6 +60,7 @@ interface Prediction {
     hesitation_on_right: number | null
   }
   pattern_risks?: { pattern_id: string; risk: number; recent_acc: number; trend: number }[]
+  concept_clusters?: { concept: string; pattern_id: string; wrong: number; total: number; wrong_rate: number }[]
   total_attempts?: number
 }
 
@@ -240,6 +241,35 @@ export default function Dashboard() {
           )
         })}
       </div>
+
+      {/* Concept clusters — specific sub-skills with repeated failures */}
+      {prediction?.concept_clusters && prediction.concept_clusters.length > 0 && (
+        <div style={{ marginTop: 12, padding: '20px 22px', borderRadius: 16,
+          background: 'rgba(255,150,0,0.06)', border: '1px solid rgba(255,150,0,0.2)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', letterSpacing: 1, marginBottom: 14 }}>
+            SPECIFIC WEAK SPOTS
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {prediction.concept_clusters.map(c => (
+              <div key={c.concept} style={{
+                padding: '8px 14px', borderRadius: 20,
+                background: 'rgba(255,150,0,0.1)', border: '1px solid rgba(255,150,0,0.3)',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>{c.concept}</span>
+                <span style={{
+                  fontSize: 11, fontWeight: 800, color: '#fff',
+                  background: 'rgba(255,61,107,0.5)', borderRadius: 10,
+                  padding: '1px 7px',
+                }}>×{c.wrong} wrong</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(255,180,60,0.5)', marginTop: 12 }}>
+            Detected from your question history — these exact sub-skills trip you up repeatedly
+          </div>
+        </div>
+      )}
 
       {/* Micro patterns */}
       {patterns.length > 0 && (
