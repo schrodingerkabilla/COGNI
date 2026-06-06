@@ -45,6 +45,11 @@ export default function App() {
     return <OnboardingPage onDone={() => nav('dashboard')} />
   }
 
+  const NAV = [
+    { id: 'dashboard' as Screen, label: 'Dashboard',  icon: '⊞' },
+    { id: 'quiz'      as Screen, label: 'Quick Quiz', icon: '⚡' },
+  ]
+
   return (
     <div className="app-layout">
       <Sidebar screen={state.screen} onNav={nav} onLogout={logout} />
@@ -55,6 +60,19 @@ export default function App() {
           {state.screen === 'quiz'      && <QuickQuiz onNav={nav} />}
         </div>
       </main>
+
+      <nav className="bottom-nav">
+        {NAV.map(item => (
+          <button
+            key={item.id}
+            className={`bottom-nav-btn ${state.screen === item.id ? 'active' : ''}`}
+            onClick={() => nav(item.id)}
+          >
+            <span className="bn-icon">{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
     </div>
   )
 }
