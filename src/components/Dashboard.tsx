@@ -1,171 +1,142 @@
 import { useEffect, useState } from 'react'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { TOPICS, DAILY_ACTIVITY } from '../data'
-import type { AppState } from '../types'
+import * as api from '../api'
 
-interface Props {
-  state: AppState
+const TOPIC_META: Record<string, { icon: string; color: string; label: string }> = {
+  'addition':       { icon: '+',  color: '#00d4ff', label: 'Addition'       },
+  'subtraction':    { icon: '−',  color: '#f59e0b', label: 'Subtraction'    },
+  'multiplication': { icon: '×',  color: '#06d6a0', label: 'Multiplication' },
+  'division':       { icon: '÷',  color: '#a78bfa', label: 'Division'       },
+  'fractions':      { icon: '½',  color: '#ff6b6b', label: 'Fractions'      },
+  'decimals':       { icon: '.5', color: '#ffd93d', label: 'Decimals'       },
+  'percentages':    { icon: '%',  color: '#6bcb77', label: 'Percentages'    },
+  'number-sense':   { icon: '#',  color: '#4d96ff', label: 'Number Sense'   },
+  'speed-math':     { icon: '⚡', color: '#ff9f43', label: 'Speed Math'     },
+  'mixed':          { icon: '∞',  color: '#c4b5fd', label: 'Mixed'          },
 }
 
-function useCountUp(target: number, duration = 900) {
-  const [val, setVal] = useState(0)
-  useEffect(() => {
-    setVal(0)
-    const start = performance.now()
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / duration, 1)
-      setVal(Math.round((1 - Math.pow(1 - t, 3)) * target))
-      if (t < 1) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
-  }, [target, duration])
-  return val
+interface TopicStat {
+  topic_id: string
+  attempts: number
+  correct:  number
+  accuracy: number
 }
 
-function StatCard({ label, value, sub, color }: { label: string; value: number | string; sub?: string; color: string }) {
-  const isNum = typeof value === 'number'
-  const animated = useCountUp(isNum ? value : 0)
-  const display = isNum ? animated.toLocaleString() : value
+interface UserStats {
+  username:         string
+  total_xp:         number
+  streak:           number
+  total_sessions:   number
+  overall_accuracy: number
+}
+
+function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
     <div className="glass stat-card" style={{ borderColor: `${color}28` }}>
       <div className="section-label" style={{ marginBottom: 6 }}>{label}</div>
-      <div className="stat-value" style={{ color, textShadow: `0 0 24px ${color}60` }}>{display}</div>
-      {sub && <div style={{ fontSize: 11, color: 'rgba(140,200,255,0.38)', marginTop: 6, fontWeight: 500 }}>{sub}</div>}
+      <div className="stat-value" style={{ color, textShadow: `0 0 24px ${color}60` }}>{value}</div>
     </div>
   )
 }
 
-function MasteryRing({ value, color, size = 44 }: { value: number; color: string; size?: number }) {
-  const r = (size - 8) / 2
-  const circ = 2 * Math.PI * r
-  const dash = (value / 100) * circ
+function AccuracyBar({ value, color }: { value: number; color: string }) {
   return (
-    <svg width={size} height={size} className="mastery-ring" style={{ flexShrink: 0 }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={5} />
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={5}
-        strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round" />
-    </svg>
+    <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden', marginTop: 8 }}>
+      <div style={{ width: `${value}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.6s ease' }} />
+    </div>
   )
 }
 
-const TOP_WEAK_PATTERNS = TOPICS
-  .flatMap(t => t.weakPatterns.map(p => ({ ...p, topicName: t.name, topicColor: t.color })))
-  .sort((a, b) => b.frequency - a.frequency).slice(0, 4)
+export default function Dashboard() {
+  const [user,   setUser]   = useState<UserStats | null>(null)
+  const [topics, setTopics] = useState<TopicStat[]>([])
+  const [loading, setLoading] = useState(true)
 
-const FOCUS_TOPICS = [...TOPICS].sort((a, b) => a.mastery - b.mastery).slice(0, 4)
-
-export default function Dashboard({ state }: Props) {
-  const streakNum   = useCountUp(state.streak)
-  const accuracyNum = useCountUp(state.accuracy)
+  useEffect(() => {
+    Promise.all([api.getMe(), api.getTopicStats()])
+      .then(([u, t]) => { setUser(u); setTopics(t) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   return (
     <div className="content-scroll">
+
+      {/* Header */}
       <div style={{ marginBottom: 24 }}>
-        <div className="screen-page-title" style={{
+        <div style={{
           fontSize: 26, fontWeight: 900, marginBottom: 6,
           background: 'linear-gradient(135deg, #ffffff 0%, #60d4ff 50%, #0088ff 100%)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          display: 'inline-block',
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', display: 'inline-block',
         }}>
-          Let's sharpen those skills ⚡
+          {user ? `Hey ${user.username} ⚡` : 'Loading...'}
         </div>
         <div style={{ fontSize: 13, color: 'rgba(0,190,255,0.55)', fontWeight: 500 }}>
-          Patterns tracked · Focus areas updated · Keep the streak alive
+          Your cognitive fingerprint — updated after every question
         </div>
       </div>
 
-      <div className="stat-row">
-        <StatCard label="Total XP"  value={state.totalXp}      sub="lifetime"        color="#00d4ff" />
-        <StatCard label="Streak"    value={`${streakNum} days`} sub="keep going!"     color="#f59e0b" />
-        <StatCard label="Sessions"  value={state.totalSessions} sub="this week"       color="#06d6a0" />
-        <StatCard label="Accuracy"  value={`${accuracyNum}%`}   sub="avg last 7 days" color="#a78bfa" />
-      </div>
-
-      <div className="dash-grid">
-        <div className="glass" style={{ padding: '20px 22px' }}>
-          <div className="section-label">Pattern Alerts</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {TOP_WEAK_PATTERNS.map(p => (
-              <div key={p.id}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#e8f4ff' }}>{p.name}</span>
-                    <span style={{
-                      marginLeft: 8, fontSize: 11, padding: '2px 7px', borderRadius: 10,
-                      background: 'rgba(0,100,255,0.15)', color: 'rgba(140,200,255,0.6)',
-                      whiteSpace: 'nowrap',
-                    }}>{p.topicName}</span>
-                  </div>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: p.topicColor, flexShrink: 0, marginLeft: 8 }}>
-                    {p.frequency}%
-                  </span>
-                </div>
-                <div className="pattern-bar-track">
-                  <div className="pattern-bar-fill" style={{ width: `${p.frequency}%`, background: p.topicColor, opacity: 0.85 }} />
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Stats */}
+      {user && (
+        <div className="stat-row">
+          <StatCard label="Total XP"   value={user.total_xp.toLocaleString()} color="#00d4ff" />
+          <StatCard label="Streak"     value={`${user.streak}d`}              color="#f59e0b" />
+          <StatCard label="Sessions"   value={user.total_sessions}            color="#06d6a0" />
+          <StatCard label="Accuracy"   value={`${user.overall_accuracy}%`}    color="#a78bfa" />
         </div>
+      )}
 
-        <div className="glass" style={{ padding: '20px 22px' }}>
-          <div className="section-label">Focus Areas</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {FOCUS_TOPICS.map(t => (
-              <div key={t.id}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '10px 12px', borderRadius: 8,
-                  background: 'rgba(0,100,255,0.06)',
-                  border: '1px solid rgba(0,140,255,0.1)',
-                }}
-              >
-                <MasteryRing value={t.mastery} color={t.color} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#e8f4ff', marginBottom: 1 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(0,190,255,0.5)' }}>
-                    {t.weakPatterns.length} pattern{t.weakPatterns.length !== 1 ? 's' : ''} detected
-                  </div>
-                </div>
-                <div style={{ fontSize: 17, fontWeight: 700, color: t.color, flexShrink: 0 }}>{t.mastery}%</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      {/* Dynamic topics */}
+      <div className="glass" style={{ padding: '20px 22px', marginTop: 8 }}>
+        <div className="section-label" style={{ marginBottom: 16 }}>Topics Encountered</div>
 
-      <div className="glass" style={{ padding: '20px 22px', marginBottom: 16 }}>
-        <div className="section-label">Weekly Activity</div>
-        <ResponsiveContainer width="100%" height={130}>
-          <AreaChart data={DAILY_ACTIVITY} margin={{ top: 4, right: 8, left: -30, bottom: 0 }}>
-            <defs>
-              <linearGradient id="xpGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#00d4ff" stopOpacity={0.35} />
-                <stop offset="95%" stopColor="#00d4ff" stopOpacity={0}    />
-              </linearGradient>
-            </defs>
-            <XAxis dataKey="day" tick={{ fill: 'rgba(0,190,255,0.5)', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: 'rgba(0,190,255,0.5)', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{ background: '#03080f', border: '1px solid rgba(0,150,255,0.35)', borderRadius: 10, fontSize: 12 }}
-              labelStyle={{ color: '#60d4ff' }}
-            />
-            <Area type="monotone" dataKey="xp" stroke="#00d4ff" strokeWidth={2} fill="url(#xpGrad)" dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+        {loading && (
+          <div style={{ color: 'rgba(140,200,255,0.4)', fontSize: 13 }}>Loading...</div>
+        )}
 
-      <div>
-        <div className="section-label">All Topics</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {TOPICS.map(t => (
-            <div key={t.id} className="topic-pill"
-              style={{ borderColor: `${t.color}44`, color: t.color }}>
-              <span>{t.icon}</span>{t.name}
-              <span style={{ fontSize: 11, opacity: 0.65 }}>{t.mastery}%</span>
+        {!loading && topics.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '32px 0' }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#e8f4ff', marginBottom: 6 }}>
+              No topics yet
             </div>
-          ))}
-        </div>
+            <div style={{ fontSize: 12, color: 'rgba(140,200,255,0.45)' }}>
+              Start a Quick Quiz — topics appear here as you encounter them
+            </div>
+          </div>
+        )}
+
+        {topics.map(t => {
+          const meta = TOPIC_META[t.topic_id] ?? { icon: '?', color: '#60d4ff', label: t.topic_id }
+          return (
+            <div key={t.topic_id} style={{
+              display: 'flex', alignItems: 'center', gap: 14,
+              padding: '14px 0',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
+            }}>
+              {/* Icon */}
+              <div style={{
+                width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: `${meta.color}18`, border: `1px solid ${meta.color}40`,
+                fontSize: 16, fontWeight: 800, color: meta.color,
+              }}>
+                {meta.icon}
+              </div>
+
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#e8f4ff' }}>{meta.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: meta.color }}>{t.accuracy}%</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(140,200,255,0.45)', marginTop: 2 }}>
+                  {t.attempts} question{t.attempts !== 1 ? 's' : ''} · {t.correct} correct
+                </div>
+                <AccuracyBar value={t.accuracy} color={meta.color} />
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

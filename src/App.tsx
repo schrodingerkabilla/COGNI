@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import type { AppState, Screen } from './types'
-import { INITIAL_STATE } from './data'
+import type { Screen } from './types'
 import Dashboard from './components/Dashboard'
 import QuickQuiz from './components/QuickQuiz'
 import LoginPage from './components/LoginPage'
@@ -13,7 +12,7 @@ function initialScreen(): Screen {
 }
 
 export default function App() {
-  const [state, setState] = useState<AppState>({ ...INITIAL_STATE, screen: initialScreen() })
+  const [state, setState] = useState<{ screen: Screen }>({ screen: initialScreen() })
 
   useEffect(() => { api.ping() }, [])
 
@@ -53,7 +52,7 @@ export default function App() {
     <div className="app-layout">
       <main className="app-main">
         <div key={state.screen} className="screen-enter">
-          {state.screen === 'dashboard' && <Dashboard state={state} />}
+          {state.screen === 'dashboard' && <Dashboard />}
           {state.screen === 'quiz'      && <QuickQuiz onNav={nav} />}
         </div>
       </main>

@@ -40,7 +40,9 @@ export async function retrying<T>(fn: () => Promise<T>, attempts = 3): Promise<T
 export const ping = () => fetch(API + '/').catch(() => {})
 
 // ── Topics ──────────────────────────────────────────────────
+export const getMe         = () => get('/auth/me')
 export const getMyTopics   = () => get('/topics/me')
+export const getTopicStats = () => get('/analytics/me/topics')
 export const getAdminStats      = () => get('/admin/stats')
 export const getDatalakeUsers   = () => get('/admin/datalake')
 export const getDatalakeUser    = (user_id: number) => get(`/admin/datalake/${user_id}`)
