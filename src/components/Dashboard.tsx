@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api'
+import WeaknessCards from './WeaknessCards'
 
 const PATTERN_NAMES: Record<string, string> = {
   ns1: 'Place Value',           ns2: 'Rounding',
@@ -41,29 +42,24 @@ interface PatternStat {
   accuracy:   number
 }
 
+interface Card {
+  id:              string
+  title:           string
+  body:            string
+  severity:        'high' | 'medium'
+  wrong_questions: string[]
+  evidence:        string
+}
+
 interface Prediction {
-  status: string
-  message?: string
-  next_likely_failure?: {
-    pattern_id:      string
-    score:           number
-    transition_prob: number
-    bkt_mastery:     number
-  }
-  error_type?: string
-  reason?: string
-  behavioral_signature?: {
-    hesitation_gap:      number | null
-    confidence_gap:      number | null
-    overall_accuracy:    number
-    hesitation_on_wrong: number | null
-    hesitation_on_right: number | null
-    error_type:          string
-  }
-  bkt_mastery?: { pattern_id: string; bkt_mastery: number }[]
-  markov_transitions?: { pattern_id: string; score: number; transition_prob: number; bkt_mastery: number }[]
-  concept_clusters?: { concept: string; pattern_id: string; wrong: number; total: number; wrong_rate: number }[]
-  total_attempts?: number
+  status:           string
+  message?:         string
+  cards?:           Card[]
+  tensor_length?:   number
+  overall_accuracy?: number
+  recent_accuracy?:  number
+  avg_hesitation?:   number
+  avg_confidence?:   number
 }
 
 interface UserStats {
@@ -132,61 +128,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Prediction card */}
-      {prediction && prediction.status === 'ok' && prediction.next_likely_failure && (
-        <div style={{
-          marginTop: 16, padding: '20px 22px', borderRadius: 16,
-          background: 'linear-gradient(135deg, rgba(255,61,107,0.1) 0%, rgba(120,0,255,0.08) 100%)',
-          border: '1px solid rgba(255,61,107,0.3)',
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#ff6b6b', letterSpacing: 1, marginBottom: 12 }}>
-            COGNITIVE PREDICTION
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-            <div style={{
-              fontSize: 28, fontWeight: 900, color: '#ff6b6b',
-              textShadow: '0 0 24px rgba(255,61,107,0.6)',
-            }}>
-              {PATTERN_NAMES[prediction.next_likely_failure.pattern_id] ?? prediction.next_likely_failure.pattern_id}
-            </div>
-            <div style={{
-              padding: '4px 10px', borderRadius: 20,
-              background: 'rgba(255,61,107,0.15)', border: '1px solid rgba(255,61,107,0.3)',
-              fontSize: 11, fontWeight: 700, color: '#ff6b6b',
-            }}>
-              BKT mastery {Math.round(prediction.next_likely_failure.bkt_mastery * 100)}%
-            </div>
-          </div>
-
-          <div style={{
-            fontSize: 13, color: 'rgba(220,200,255,0.8)', lineHeight: 1.6, marginBottom: 14,
-          }}>
-            {prediction.reason}
-          </div>
-
-          {prediction.behavioral_signature && (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {[
-                { label: 'Error type',      value: prediction.behavioral_signature.error_type ?? '—' },
-                { label: 'Hesitation gap', value: prediction.behavioral_signature.hesitation_gap != null ? `+${Math.round(prediction.behavioral_signature.hesitation_gap * 100)}%` : '—' },
-                { label: 'Confidence gap', value: prediction.behavioral_signature.confidence_gap != null ? `+${Math.round(prediction.behavioral_signature.confidence_gap * 100)}%` : '—' },
-              ].map(item => (
-                <div key={item.label} style={{
-                  padding: '6px 12px', borderRadius: 8,
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                }}>
-                  <div style={{ fontSize: 9, color: 'rgba(140,200,255,0.4)', fontWeight: 700, marginBottom: 2 }}>{item.label.toUpperCase()}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#e8f4ff' }}>{item.value}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Weakness flashcards */}
+      {prediction?.cards && prediction.cards.length > 0 && (
+        <WeaknessCards cards={prediction.cards} />
       )}
 
-      {prediction && (prediction.status === 'no_data' || prediction.status === 'building') && (
+      {prediction && prediction.status === 'no_data' && (
         <div style={{
           marginTop: 16, padding: '16px 20px', borderRadius: 14,
           background: 'rgba(0,100,255,0.06)', border: '1px solid rgba(0,140,255,0.15)',
@@ -244,34 +191,6 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Concept clusters — specific sub-skills with repeated failures */}
-      {prediction?.concept_clusters && prediction.concept_clusters.length > 0 && (
-        <div style={{ marginTop: 12, padding: '20px 22px', borderRadius: 16,
-          background: 'rgba(255,150,0,0.06)', border: '1px solid rgba(255,150,0,0.2)' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', letterSpacing: 1, marginBottom: 14 }}>
-            SPECIFIC WEAK SPOTS
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {prediction.concept_clusters.map(c => (
-              <div key={c.concept} style={{
-                padding: '8px 14px', borderRadius: 20,
-                background: 'rgba(255,150,0,0.1)', border: '1px solid rgba(255,150,0,0.3)',
-                display: 'flex', alignItems: 'center', gap: 8,
-              }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24' }}>{c.concept}</span>
-                <span style={{
-                  fontSize: 11, fontWeight: 800, color: '#fff',
-                  background: 'rgba(255,61,107,0.5)', borderRadius: 10,
-                  padding: '1px 7px',
-                }}>×{c.wrong} wrong</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: 'rgba(255,180,60,0.5)', marginTop: 12 }}>
-            Detected from your question history — these exact sub-skills trip you up repeatedly
-          </div>
-        </div>
-      )}
 
       {/* Micro patterns */}
       {patterns.length > 0 && (
