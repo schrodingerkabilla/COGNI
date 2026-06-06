@@ -16,6 +16,7 @@ interface Props {
 export default function WeaknessCards({ cards }: Props) {
   const [idx,      setIdx]      = useState(0)
   const [expanded, setExpanded] = useState(false)
+  const [slideKey, setSlideKey] = useState(0)
 
   if (!cards || cards.length === 0) return null
 
@@ -25,8 +26,13 @@ export default function WeaknessCards({ cards }: Props) {
   const bg      = isHigh ? 'rgba(255,61,107,0.08)' : 'rgba(245,158,11,0.08)'
   const border  = isHigh ? 'rgba(255,61,107,0.28)' : 'rgba(245,158,11,0.28)'
 
-  const prev = () => { setIdx(i => (i - 1 + cards.length) % cards.length); setExpanded(false) }
-  const next = () => { setIdx(i => (i + 1) % cards.length); setExpanded(false) }
+  const go = (newIdx: number) => {
+    setIdx(newIdx)
+    setExpanded(false)
+    setSlideKey(k => k + 1)
+  }
+  const prev = () => go((idx - 1 + cards.length) % cards.length)
+  const next = () => go((idx + 1) % cards.length)
 
   return (
     <div style={{ marginTop: 16 }}>
@@ -36,11 +42,13 @@ export default function WeaknessCards({ cards }: Props) {
 
       {/* Card */}
       <div
+        key={slideKey}
         onClick={() => setExpanded(e => !e)}
+        className="card-slide"
         style={{
           padding: '18px 20px', borderRadius: 16, cursor: 'pointer',
           background: bg, border: `1px solid ${border}`,
-          transition: 'all 0.2s',
+          transition: 'border-color 0.2s, background 0.2s',
           userSelect: 'none',
         }}
       >
@@ -74,7 +82,7 @@ export default function WeaknessCards({ cards }: Props) {
           }}>←</button>
 
           {cards.map((_, i) => (
-            <div key={i} onClick={e => { e.stopPropagation(); setIdx(i); setExpanded(false) }}
+            <div key={i} onClick={e => { e.stopPropagation(); go(i) }}
               style={{
                 width: i === idx ? 18 : 6, height: 6, borderRadius: 3,
                 background: i === idx ? accent : 'rgba(255,255,255,0.15)',

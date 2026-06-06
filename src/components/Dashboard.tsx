@@ -119,14 +119,20 @@ export default function Dashboard() {
       </div>
 
       {/* Stats */}
-      {user && (
+      {loading ? (
         <div className="stat-row">
+          {[1,2,3,4].map(i => (
+            <div key={i} className="skeleton stat-card" style={{ height: 80 }} />
+          ))}
+        </div>
+      ) : user ? (
+        <div className="stat-row fade-up">
           <StatCard label="Total XP"   value={user.total_xp.toLocaleString()} color="#00d4ff" />
           <StatCard label="Streak"     value={`${user.streak}d`}              color="#f59e0b" />
           <StatCard label="Sessions"   value={user.total_sessions}            color="#06d6a0" />
           <StatCard label="Accuracy"   value={`${user.overall_accuracy}%`}    color="#a78bfa" />
         </div>
-      )}
+      ) : null}
 
       {/* Weakness flashcards */}
       {prediction?.cards && prediction.cards.length > 0 && (
@@ -148,7 +154,11 @@ export default function Dashboard() {
         <div className="section-label" style={{ marginBottom: 16 }}>Topics Encountered</div>
 
         {loading && (
-          <div style={{ color: 'rgba(140,200,255,0.4)', fontSize: 13 }}>Loading...</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[80, 60, 70].map((w, i) => (
+              <div key={i} className="skeleton" style={{ height: 52, width: `${w}%`, borderRadius: 10 }} />
+            ))}
+          </div>
         )}
 
         {!loading && topics.length === 0 && (
