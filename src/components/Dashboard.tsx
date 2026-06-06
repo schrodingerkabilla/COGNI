@@ -41,6 +41,28 @@ interface PatternStat {
   accuracy:   number
 }
 
+interface Prediction {
+  status: string
+  message?: string
+  next_likely_failure?: {
+    pattern_id:          string
+    risk_score:          number
+    recent_accuracy:     number
+    attempts_on_pattern: number
+  }
+  error_type?: string
+  reason?: string
+  behavioral_signature?: {
+    hesitation_gap:      number | null
+    confidence_gap:      number | null
+    overall_accuracy:    number
+    hesitation_on_wrong: number | null
+    hesitation_on_right: number | null
+  }
+  pattern_risks?: { pattern_id: string; risk: number; recent_acc: number; trend: number }[]
+  total_attempts?: number
+}
+
 interface UserStats {
   username:         string
   total_xp:         number
@@ -67,14 +89,15 @@ function AccuracyBar({ value, color }: { value: number; color: string }) {
 }
 
 export default function Dashboard() {
-  const [user,     setUser]     = useState<UserStats | null>(null)
-  const [topics,   setTopics]   = useState<TopicStat[]>([])
-  const [patterns, setPatterns] = useState<PatternStat[]>([])
-  const [loading,  setLoading]  = useState(true)
+  const [user,       setUser]       = useState<UserStats | null>(null)
+  const [topics,     setTopics]     = useState<TopicStat[]>([])
+  const [patterns,   setPatterns]   = useState<PatternStat[]>([])
+  const [prediction, setPrediction] = useState<Prediction | null>(null)
+  const [loading,    setLoading]    = useState(true)
 
   useEffect(() => {
-    Promise.all([api.getMe(), api.getTopicStats(), api.getPatternStats()])
-      .then(([u, t, p]) => { setUser(u); setTopics(t); setPatterns(p) })
+    Promise.all([api.getMe(), api.getTopicStats(), api.getPatternStats(), api.getPredict()])
+      .then(([u, t, p, pr]) => { setUser(u); setTopics(t); setPatterns(p); setPrediction(pr) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -106,8 +129,72 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Prediction card */}
+      {prediction && prediction.status === 'ok' && prediction.next_likely_failure && (
+        <div style={{
+          marginTop: 16, padding: '20px 22px', borderRadius: 16,
+          background: 'linear-gradient(135deg, rgba(255,61,107,0.1) 0%, rgba(120,0,255,0.08) 100%)',
+          border: '1px solid rgba(255,61,107,0.3)',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#ff6b6b', letterSpacing: 1, marginBottom: 12 }}>
+            COGNITIVE PREDICTION
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <div style={{
+              fontSize: 28, fontWeight: 900, color: '#ff6b6b',
+              textShadow: '0 0 24px rgba(255,61,107,0.6)',
+            }}>
+              {PATTERN_NAMES[prediction.next_likely_failure.pattern_id] ?? prediction.next_likely_failure.pattern_id}
+            </div>
+            <div style={{
+              padding: '4px 10px', borderRadius: 20,
+              background: 'rgba(255,61,107,0.15)', border: '1px solid rgba(255,61,107,0.3)',
+              fontSize: 11, fontWeight: 700, color: '#ff6b6b',
+            }}>
+              {prediction.next_likely_failure.recent_accuracy}% recent accuracy
+            </div>
+          </div>
+
+          <div style={{
+            fontSize: 13, color: 'rgba(220,200,255,0.8)', lineHeight: 1.6, marginBottom: 14,
+          }}>
+            {prediction.reason}
+          </div>
+
+          {prediction.behavioral_signature && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {[
+                { label: 'Error type',   value: prediction.error_type ?? '—' },
+                { label: 'Hesitation gap', value: prediction.behavioral_signature.hesitation_gap != null ? `${Math.round(prediction.behavioral_signature.hesitation_gap * 100)}%` : '—' },
+                { label: 'Confidence gap', value: prediction.behavioral_signature.confidence_gap != null ? `${Math.round(prediction.behavioral_signature.confidence_gap * 100)}%` : '—' },
+              ].map(item => (
+                <div key={item.label} style={{
+                  padding: '6px 12px', borderRadius: 8,
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                }}>
+                  <div style={{ fontSize: 9, color: 'rgba(140,200,255,0.4)', fontWeight: 700, marginBottom: 2 }}>{item.label.toUpperCase()}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#e8f4ff' }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {prediction && (prediction.status === 'no_data' || prediction.status === 'building') && (
+        <div style={{
+          marginTop: 16, padding: '16px 20px', borderRadius: 14,
+          background: 'rgba(0,100,255,0.06)', border: '1px solid rgba(0,140,255,0.15)',
+          fontSize: 13, color: 'rgba(140,200,255,0.6)',
+        }}>
+          🧠 {prediction.message}
+        </div>
+      )}
+
       {/* Dynamic topics */}
-      <div className="glass" style={{ padding: '20px 22px', marginTop: 8 }}>
+      <div className="glass" style={{ padding: '20px 22px', marginTop: 16 }}>
         <div className="section-label" style={{ marginBottom: 16 }}>Topics Encountered</div>
 
         {loading && (
