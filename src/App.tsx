@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import './App.css'
 import type { AppState, Screen } from './types'
 import { INITIAL_STATE } from './data'
-import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import QuickQuiz from './components/QuickQuiz'
 import LoginPage from './components/LoginPage'
@@ -52,8 +51,6 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar screen={state.screen} onNav={nav} onLogout={logout} />
-
       <main className="app-main">
         <div key={state.screen} className="screen-enter">
           {state.screen === 'dashboard' && <Dashboard state={state} />}
@@ -72,6 +69,10 @@ export default function App() {
             {item.label}
           </button>
         ))}
+        <button className="bottom-nav-btn" onClick={logout}>
+          <span className="bn-icon">⏻</span>
+          Logout
+        </button>
       </nav>
     </div>
   )
