@@ -5,7 +5,6 @@ import type { AppState } from '../types'
 
 interface Props {
   state: AppState
-  onTopicClick: (id: string) => void
 }
 
 function useCountUp(target: number, duration = 900) {
@@ -55,7 +54,7 @@ const TOP_WEAK_PATTERNS = TOPICS
 
 const FOCUS_TOPICS = [...TOPICS].sort((a, b) => a.mastery - b.mastery).slice(0, 4)
 
-export default function Dashboard({ state, onTopicClick }: Props) {
+export default function Dashboard({ state }: Props) {
   const streakNum   = useCountUp(state.streak)
   const accuracyNum = useCountUp(state.accuracy)
 
@@ -113,16 +112,13 @@ export default function Dashboard({ state, onTopicClick }: Props) {
           <div className="section-label">Focus Areas</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {FOCUS_TOPICS.map(t => (
-              <div key={t.id} onClick={() => onTopicClick(t.id)}
+              <div key={t.id}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '10px 12px', borderRadius: 8,
                   background: 'rgba(0,100,255,0.06)',
                   border: '1px solid rgba(0,140,255,0.1)',
-                  cursor: 'pointer', transition: 'background 0.15s',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,130,255,0.14)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,100,255,0.06)')}
               >
                 <MasteryRing value={t.mastery} color={t.color} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -163,11 +159,11 @@ export default function Dashboard({ state, onTopicClick }: Props) {
         <div className="section-label">All Topics</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {TOPICS.map(t => (
-            <button key={t.id} className="topic-pill" onClick={() => onTopicClick(t.id)}
+            <div key={t.id} className="topic-pill"
               style={{ borderColor: `${t.color}44`, color: t.color }}>
               <span>{t.icon}</span>{t.name}
               <span style={{ fontSize: 11, opacity: 0.65 }}>{t.mastery}%</span>
-            </button>
+            </div>
           ))}
         </div>
       </div>

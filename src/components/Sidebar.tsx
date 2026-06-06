@@ -7,11 +7,8 @@ interface Props {
 }
 
 const NAV = [
-  { id: 'dashboard' as Screen, label: 'Dashboard',     icon: '⊞' },
-  { id: 'graph'     as Screen, label: 'Knowledge Map', icon: '◎' },
-  { id: 'quiz'      as Screen, label: 'Quick Quiz',    icon: '⚡' },
-  { id: 'insights'  as Screen, label: 'AI Insights',   icon: '⚡' },
-  { id: 'data'      as Screen, label: 'Data Lake',     icon: '◉' },
+  { id: 'dashboard' as Screen, label: 'Dashboard',  icon: '⊞' },
+  { id: 'quiz'      as Screen, label: 'Quick Quiz', icon: '⚡' },
 ]
 
 export default function Sidebar({ screen, onNav, onLogout }: Props) {
@@ -56,7 +53,6 @@ export default function Sidebar({ screen, onNav, onLogout }: Props) {
         }}>J</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#e8f4ff' }}>Student</div>
-          <div style={{ fontSize: 11, color: 'rgba(0,190,255,0.55)', fontWeight: 500 }}>Level 7 · 6870 XP</div>
         </div>
         <button
           onClick={onLogout}
