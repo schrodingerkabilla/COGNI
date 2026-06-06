@@ -1,6 +1,18 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api'
 
+const PATTERN_NAMES: Record<string, string> = {
+  ns1: 'Place Value',           ns2: 'Rounding',
+  ad1: 'Round & Compensate',   ad2: 'Multi-addend Addition',
+  sb1: 'Bridge Through 100',   sb2: 'Round & Compensate (Sub)',
+  ml1: 'Expand & Multiply',    ml2: 'Times Tables',       ml3: 'Multiply by 10s',
+  dv1: 'Think Multiplication', dv2: 'Partial Quotients',
+  fr1: 'Same Denom Addition',  fr2: 'Fraction to Percent',
+  dc1: 'Pair the Halves',      dc2: 'Decimal Multiply',
+  pc1: 'Percentage Shortcuts', pc2: 'Reverse Percentage',
+  sm1: 'BODMAS',               sm2: 'Squaring Shortcut',
+}
+
 const TOPIC_META: Record<string, { icon: string; color: string; label: string }> = {
   'addition':       { icon: '+',  color: '#00d4ff', label: 'Addition'       },
   'subtraction':    { icon: '−',  color: '#f59e0b', label: 'Subtraction'    },
@@ -19,6 +31,14 @@ interface TopicStat {
   attempts: number
   correct:  number
   accuracy: number
+}
+
+interface PatternStat {
+  pattern_id: string
+  topic_id:   string
+  attempts:   number
+  correct:    number
+  accuracy:   number
 }
 
 interface UserStats {
@@ -47,13 +67,14 @@ function AccuracyBar({ value, color }: { value: number; color: string }) {
 }
 
 export default function Dashboard() {
-  const [user,   setUser]   = useState<UserStats | null>(null)
-  const [topics, setTopics] = useState<TopicStat[]>([])
-  const [loading, setLoading] = useState(true)
+  const [user,     setUser]     = useState<UserStats | null>(null)
+  const [topics,   setTopics]   = useState<TopicStat[]>([])
+  const [patterns, setPatterns] = useState<PatternStat[]>([])
+  const [loading,  setLoading]  = useState(true)
 
   useEffect(() => {
-    Promise.all([api.getMe(), api.getTopicStats()])
-      .then(([u, t]) => { setUser(u); setTopics(t) })
+    Promise.all([api.getMe(), api.getTopicStats(), api.getPatternStats()])
+      .then(([u, t, p]) => { setUser(u); setTopics(t); setPatterns(p) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -110,20 +131,14 @@ export default function Dashboard() {
           return (
             <div key={t.topic_id} style={{
               display: 'flex', alignItems: 'center', gap: 14,
-              padding: '14px 0',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              padding: '14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
             }}>
-              {/* Icon */}
               <div style={{
                 width: 38, height: 38, borderRadius: 10, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: `${meta.color}18`, border: `1px solid ${meta.color}40`,
                 fontSize: 16, fontWeight: 800, color: meta.color,
-              }}>
-                {meta.icon}
-              </div>
-
-              {/* Info */}
+              }}>{meta.icon}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#e8f4ff' }}>{meta.label}</span>
@@ -138,6 +153,46 @@ export default function Dashboard() {
           )
         })}
       </div>
+
+      {/* Micro patterns */}
+      {patterns.length > 0 && (
+        <div className="glass" style={{ padding: '20px 22px', marginTop: 12 }}>
+          <div className="section-label" style={{ marginBottom: 16 }}>Patterns Breakdown</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {patterns.map(p => {
+              const topicMeta = TOPIC_META[p.topic_id] ?? { color: '#60d4ff', label: p.topic_id, icon: '?' }
+              const name = PATTERN_NAMES[p.pattern_id] ?? p.pattern_id
+              const isWeak = p.accuracy < 50
+              return (
+                <div key={p.pattern_id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 12px', borderRadius: 10,
+                  background: isWeak ? 'rgba(255,61,107,0.06)' : 'rgba(0,100,255,0.05)',
+                  border: `1px solid ${isWeak ? 'rgba(255,61,107,0.2)' : 'rgba(0,140,255,0.1)'}`,
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#e8f4ff' }}>{name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: isWeak ? '#ff6b6b' : '#06d6a0' }}>
+                        {p.accuracy}%
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                      <span style={{ fontSize: 10, color: topicMeta.color, fontWeight: 600 }}>
+                        {topicMeta.label}
+                      </span>
+                      <span style={{ fontSize: 10, color: 'rgba(140,200,255,0.4)' }}>
+                        {p.attempts} attempts
+                      </span>
+                    </div>
+                    <AccuracyBar value={p.accuracy} color={isWeak ? '#ff6b6b' : '#06d6a0'} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
