@@ -45,10 +45,10 @@ interface Prediction {
   status: string
   message?: string
   next_likely_failure?: {
-    pattern_id:          string
-    risk_score:          number
-    recent_accuracy:     number
-    attempts_on_pattern: number
+    pattern_id:      string
+    score:           number
+    transition_prob: number
+    bkt_mastery:     number
   }
   error_type?: string
   reason?: string
@@ -58,8 +58,10 @@ interface Prediction {
     overall_accuracy:    number
     hesitation_on_wrong: number | null
     hesitation_on_right: number | null
+    error_type:          string
   }
-  pattern_risks?: { pattern_id: string; risk: number; recent_acc: number; trend: number }[]
+  bkt_mastery?: { pattern_id: string; bkt_mastery: number }[]
+  markov_transitions?: { pattern_id: string; score: number; transition_prob: number; bkt_mastery: number }[]
   concept_clusters?: { concept: string; pattern_id: string; wrong: number; total: number; wrong_rate: number }[]
   total_attempts?: number
 }
@@ -153,7 +155,7 @@ export default function Dashboard() {
               background: 'rgba(255,61,107,0.15)', border: '1px solid rgba(255,61,107,0.3)',
               fontSize: 11, fontWeight: 700, color: '#ff6b6b',
             }}>
-              {prediction.next_likely_failure.recent_accuracy}% recent accuracy
+              BKT mastery {Math.round(prediction.next_likely_failure.bkt_mastery * 100)}%
             </div>
           </div>
 
@@ -166,9 +168,9 @@ export default function Dashboard() {
           {prediction.behavioral_signature && (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {[
-                { label: 'Error type',   value: prediction.error_type ?? '—' },
-                { label: 'Hesitation gap', value: prediction.behavioral_signature.hesitation_gap != null ? `${Math.round(prediction.behavioral_signature.hesitation_gap * 100)}%` : '—' },
-                { label: 'Confidence gap', value: prediction.behavioral_signature.confidence_gap != null ? `${Math.round(prediction.behavioral_signature.confidence_gap * 100)}%` : '—' },
+                { label: 'Error type',      value: prediction.behavioral_signature.error_type ?? '—' },
+                { label: 'Hesitation gap', value: prediction.behavioral_signature.hesitation_gap != null ? `+${Math.round(prediction.behavioral_signature.hesitation_gap * 100)}%` : '—' },
+                { label: 'Confidence gap', value: prediction.behavioral_signature.confidence_gap != null ? `+${Math.round(prediction.behavioral_signature.confidence_gap * 100)}%` : '—' },
               ].map(item => (
                 <div key={item.label} style={{
                   padding: '6px 12px', borderRadius: 8,
